@@ -1,0 +1,14 @@
+services:
+  reportsdb:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: reportsdb:latest
+    container_name: reportsdb
+    ports:
+      - "8501:8501"
+    volumes:
+      # Чтобы пересобрать БД без пересборки образа — положите файл в data/raw/
+      # и запустите: docker compose exec reportsdb python -m reportsdb build ...
+      - ../data:/app/data
+    restart: unless-stopped

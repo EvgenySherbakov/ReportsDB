@@ -1,0 +1,117 @@
+# Маппинг колонок исходных Excel-файлов на модель данных.
+# ЕДИНСТВЕННОЕ место, где живут имена колонок. См. docs/TZ.md, разделы 3.3 и 11.
+#
+# Как заполнять:
+#   1. python -m reportsdb profile data/raw/<файл>.xlsx
+#   2. Вписать реальные заголовки в списки ниже.
+# Сопоставление идёт без учёта регистра и краевых пробелов; берётся первый
+# заголовок из списка, который нашёлся в файле. Обязательное поле — report_name.
+
+reports:
+  # Имя листа Excel. null = первый лист в книге.
+  sheet: null
+  # Номер строки с заголовками, считая с 0 (если сверху есть шапка — увеличить).
+  header_row: 0
+  columns:
+    report_name:
+      - Report
+      - Report Name
+      - Отчёт
+      - Отчет
+      - Наименование отчёта
+    catalog_path:
+      - Path
+      - Catalog
+      - Каталог
+      - Путь
+      - Папка
+    source_tables:
+      - Tables
+      - Source Tables
+      - Таблицы
+      - Источники
+      - Таблицы источников
+    description:
+      - Description
+      - Описание
+    owner:
+      - Owner
+      - Владелец
+      - Ответственный
+  # Разделитель элементов внутри ячейки со списком таблиц.
+  table_separator: ";"
+
+# Размеры таблиц. Файл появится позже: положить в data/raw/ и указать имя.
+table_sizes:
+  file: null # напр. table_sizes.xlsx
+  sheet: null
+  header_row: 0
+  columns:
+    full_name: # "схема.таблица" одной строкой
+      - Table
+      - Full Name
+      - Таблица
+    schema_name: # альтернатива full_name: схема и имя раздельно
+      - Schema
+      - Схема
+    table_name:
+      - Table Name
+      - Имя таблицы
+    row_count:
+      - Rows
+      - Row Count
+      - Строк
+      - Количество строк
+    data_mb:
+      - Data MB
+      - DataMB
+      - Данные МБ
+    index_mb:
+      - Index MB
+      - IndexMB
+      - Индексы МБ
+    total_mb:
+      - Total MB
+      - TotalMB
+      - Размер МБ
+      - Итого МБ
+    measured_at:
+      - Measured At
+      - Дата замера
+
+# Частота использования отчётов. Файл появится позже.
+report_usage:
+  file: null # напр. report_usage.xlsx
+  sheet: null
+  header_row: 0
+  columns:
+    report_name:
+      - Report
+      - Report Name
+      - Отчёт
+      - Отчет
+    catalog_path: # опционально, повышает точность сопоставления
+      - Path
+      - Каталог
+      - Путь
+    exec_count:
+      - Executions
+      - Exec Count
+      - Запусков
+      - Количество запусков
+    distinct_users:
+      - Users
+      - Distinct Users
+      - Пользователей
+    avg_duration_ms:
+      - Avg Duration Ms
+      - Средняя длительность
+    last_executed_at:
+      - Last Executed
+      - Последний запуск
+    period_start:
+      - Period Start
+      - Начало периода
+    period_end:
+      - Period End
+      - Конец периода

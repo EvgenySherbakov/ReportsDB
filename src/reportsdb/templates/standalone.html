@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Отчётность SSRS — аналитика</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f4f2;
+    --surface-1: #fcfcfb;
+    --border:    #dedcd6;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #8a8985;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --warn-bg:  #fdf4e6;
+    --warn-br:  #eda100;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --border:    #35342f;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8a8985;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --warn-bg:  #2a2410;
+      --warn-br:  #c98500;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #111110;
+    --surface-1: #1a1a19;
+    --border:    #35342f;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #8a8985;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --warn-bg:  #2a2410;
+    --warn-br:  #c98500;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 1.5rem 4rem;
+    background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+           padding: 1.75rem 0 1rem; }
+  h1 { font-size: 1.4rem; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  h2 { font-size: 1.05rem; margin: 0 0 .75rem; font-weight: 620; }
+  .sub { color: var(--text-muted); font-size: .85rem; }
+  #theme { margin-left: auto; background: var(--surface-1); color: var(--text-secondary);
+           border: 1px solid var(--border); border-radius: 6px; padding: .35rem .7rem;
+           cursor: pointer; font-size: .85rem; }
+
+  .kpis { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          margin-bottom: 1.25rem; }
+  .kpi { background: var(--surface-1); border: 1px solid var(--border);
+         border-radius: 10px; padding: .8rem .9rem; }
+  .kpi .v { font-size: 1.5rem; font-weight: 640; font-variant-numeric: tabular-nums; }
+  .kpi .l { color: var(--text-secondary); font-size: .78rem; margin-top: .15rem; }
+
+  .note { background: var(--warn-bg); border-left: 3px solid var(--warn-br);
+          border-radius: 0 8px 8px 0; padding: .7rem .9rem; margin: 0 0 1.25rem;
+          font-size: .87rem; color: var(--text-secondary); }
+  .note b { color: var(--text-primary); }
+
+  section { background: var(--surface-1); border: 1px solid var(--border);
+            border-radius: 10px; padding: 1.1rem; margin-bottom: 1.25rem; }
+  .controls { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .9rem; }
+  input[type=search], select {
+    background: var(--surface-0); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: .4rem .6rem; font-size: .87rem; font-family: inherit;
+  }
+  input[type=search] { min-width: 220px; flex: 1; }
+  button.csv { background: var(--surface-0); color: var(--text-secondary);
+               border: 1px solid var(--border); border-radius: 6px;
+               padding: .4rem .8rem; cursor: pointer; font-size: .85rem; }
+  button.csv:hover { color: var(--text-primary); }
+
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--border);
+           white-space: nowrap; }
+  th { color: var(--text-secondary); font-weight: 600; cursor: pointer;
+       position: sticky; top: 0; background: var(--surface-1); user-select: none; }
+  th:hover { color: var(--text-primary); }
+  th[data-dir]::after { content: " ▲"; font-size: .7em; }
+  th[data-dir="desc"]::after { content: " ▼"; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.name { white-space: normal; min-width: 220px; }
+  tbody tr:hover { background: var(--surface-0); }
+  .tall { max-height: 460px; overflow-y: auto; }
+
+  /* Горизонтальная столбчатая диаграмма на чистом CSS. */
+  .chart { display: grid; grid-template-columns: minmax(140px, 260px) 1fr auto;
+           gap: .35rem .7rem; align-items: center; font-size: .84rem; }
+  .chart .lbl { color: var(--text-secondary); overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+  .chart .track { display: flex; gap: 2px; height: 14px; }
+  .chart .seg { border-radius: 0 4px 4px 0; min-width: 2px; }
+  .chart .seg.s1 { background: var(--series-1); }
+  .chart .seg.s2 { background: var(--series-2); }
+  .chart .val { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .legend { display: flex; gap: 1rem; font-size: .82rem; color: var(--text-secondary);
+            margin-bottom: .75rem; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+              margin-right: .35rem; vertical-align: baseline; }
+  .legend .s1 { background: var(--series-1); }
+  .legend .s2 { background: var(--series-2); }
+  .empty { color: var(--text-muted); font-size: .87rem; padding: .5rem 0; }
+  footer { color: var(--text-muted); font-size: .8rem; padding-top: .5rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Отчётность SSRS</h1>
+  <span class="sub" id="meta"></span>
+  <button id="theme" type="button">Тема</button>
+</header>
+
+<div class="kpis" id="kpis"></div>
+
+<p class="note">
+  <b>gross_mb</b> суммирует общие таблицы в каждом отчёте заново — складывать этот
+  столбец по отчётам нельзя, это не объём хранилища. Объём, который реально
+  освободится при выводе отчёта, — <b>exclusive_mb</b>: таблицы, которых не
+  касается больше ни один отчёт.
+</p>
+
+<section>
+  <h2>Топ-20 отчётов по освобождаемому объёму</h2>
+  <div class="legend">
+    <span><i class="s1"></i>Освободится (эксклюзивные таблицы)</span>
+    <span><i class="s2"></i>Останется (общие таблицы)</span>
+  </div>
+  <div class="chart" id="chart-top"></div>
+</section>
+
+<section>
+  <h2>Отчёты</h2>
+  <div class="controls">
+    <input type="search" id="q-reports" placeholder="Поиск по имени или пути…">
+    <select id="f-folder"></select>
+    <button class="csv" data-csv="reports">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-reports"></table></div>
+</section>
+
+<section>
+  <h2>Кандидаты на вывод из эксплуатации</h2>
+  <div class="controls">
+    <input type="search" id="q-candidates" placeholder="Поиск…">
+    <select id="f-confidence"></select>
+    <button class="csv" data-csv="candidates">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-candidates"></table></div>
+</section>
+
+<section>
+  <h2>Таблицы-источники</h2>
+  <div class="controls">
+    <input type="search" id="q-tables" placeholder="Поиск по имени таблицы…">
+    <select id="f-schema"></select>
+    <button class="csv" data-csv="tables">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-tables"></table></div>
+</section>
+
+<footer id="foot"></footer>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+
+const nf = new Intl.NumberFormat('ru-RU');
+const nf1 = new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 1});
+const fmt = (v, d) => v === null || v === undefined || Number.isNaN(v)
+  ? '—' : (d ? nf1.format(v) : nf.format(v));
+
+/* --- Тема ------------------------------------------------------------- */
+document.getElementById('theme').onclick = () => {
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const cur = document.documentElement.dataset.theme || (dark ? 'dark' : 'light');
+  document.documentElement.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+};
+
+/* --- KPI --------------------------------------------------------------- */
+const k = DATA.kpi;
+const kpis = [
+  ['Отчётов', fmt(k.reports)],
+  ['Таблиц-источников', fmt(k.tables)],
+  ['Связей', fmt(k.links)],
+  ['Таблиц без отчётов', fmt(k.orphans)],
+  ['Объём таблиц, МБ', fmt(k.total_mb, 1)],
+  ['Покрытие размерами', k.coverage === null ? '—' : fmt(k.coverage) + '%'],
+];
+document.getElementById('kpis').innerHTML = kpis
+  .map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`)
+  .join('');
+document.getElementById('meta').textContent =
+  `собрано ${DATA.generated_at}` + (k.source_file ? ` из ${k.source_file}` : '');
+document.getElementById('foot').textContent =
+  'Список источников взят из исходной выгрузки и отражает её содержимое, а не '
+  + 'фактические зависимости: обращения через хранимые процедуры и представления '
+  + 'в нём не видны. Перед выводом отчёта проверяйте вручную.';
+
+/* --- Диаграмма топ-20 --------------------------------------------------- */
+(() => {
+  const rows = DATA.reports.slice(0, 20).filter(r => (r.gross_mb || 0) > 0);
+  const host = document.getElementById('chart-top');
+  if (!rows.length) {
+    host.innerHTML = '<div class="empty">Диаграмма появится после загрузки размеров таблиц.</div>';
+    return;
+  }
+  const max = Math.max(...rows.map(r => r.gross_mb || 0));
+  host.innerHTML = rows.map(r => {
+    const ex = 100 * (r.exclusive_mb || 0) / max;
+    const sh = 100 * (r.shared_mb || 0) / max;
+    return `<div class="lbl" title="${esc(r.report_name)}">${esc(r.report_name)}</div>
+      <div class="track">
+        ${ex > 0 ? `<div class="seg s1" style="width:${ex}%"></div>` : ''}
+        ${sh > 0 ? `<div class="seg s2" style="width:${sh}%"></div>` : ''}
+      </div>
+      <div class="val">${fmt(r.exclusive_mb, 1)} / ${fmt(r.gross_mb, 1)} МБ</div>`;
+  }).join('');
+})();
+
+/* --- Таблицы ------------------------------------------------------------ */
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c =>
+    ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+}
+
+function makeTable(opts) {
+  const { el, rows, cols, search, filter, filterField, filterLabel } = opts;
+  const table = document.getElementById(el);
+  let sortKey = cols.find(c => c.sort)?.key ?? cols[0].key;
+  let sortDir = 'desc';
+
+  if (filter) {
+    const values = [...new Set(rows.map(r => r[filterField]).filter(v => v != null))].sort();
+    filter.innerHTML = `<option value="">${filterLabel}</option>`
+      + values.map(v => `<option>${esc(v)}</option>`).join('');
+    filter.onchange = render;
+  }
+  if (search) search.oninput = render;
+
+  function current() {
+    const q = (search?.value || '').toLowerCase().trim();
+    const f = filter?.value || '';
+    let out = rows.filter(r => {
+      if (f && String(r[filterField]) !== f) return false;
+      if (!q) return true;
+      return cols.some(c => String(r[c.key] ?? '').toLowerCase().includes(q));
+    });
+    return out.sort((a, b) => {
+      const x = a[sortKey], y = b[sortKey];
+      const nx = x === null || x === undefined, ny = y === null || y === undefined;
+      if (nx && ny) return 0;
+      if (nx) return 1;
+      if (ny) return -1;
+      const cmp = typeof x === 'number' && typeof y === 'number'
+        ? x - y : String(x).localeCompare(String(y), 'ru');
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }
+
+  function render() {
+    const data = current();
+    const head = cols.map(c =>
+      `<th data-key="${c.key}"${c.key === sortKey ? ` data-dir="${sortDir}"` : ''}>${esc(c.label)}</th>`
+    ).join('');
+    const body = data.map(r => '<tr>' + cols.map(c => {
+      const v = r[c.key];
+      if (c.num) return `<td class="num">${fmt(v, c.dec)}</td>`;
+      if (c.bool) return `<td class="num">${v ? 'да' : '—'}</td>`;
+      return `<td class="${c.wide ? 'name' : ''}">${esc(v ?? '—')}</td>`;
+    }).join('') + '</tr>').join('');
+    table.innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
+    table.querySelectorAll('th').forEach(th => th.onclick = () => {
+      const key = th.dataset.key;
+      if (key === sortKey) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      else { sortKey = key; sortDir = 'desc'; }
+      render();
+    });
+  }
+
+  render();
+  return current;
+}
+
+const REPORT_COLS = [
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'catalog_path', label: 'Каталог'},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'exclusive_mb', label: 'exclusive_mb', num: true, dec: 1, sort: true},
+  {key: 'shared_mb', label: 'shared_mb', num: true, dec: 1},
+  {key: 'gross_mb', label: 'gross_mb ⚠', num: true, dec: 1},
+  {key: 'size_coverage_pct', label: 'Покрытие, %', num: true, dec: 1},
+  {key: 'exec_count', label: 'Запусков', num: true},
+  {key: 'quadrant', label: 'Квадрант'},
+];
+const CANDIDATE_COLS = [
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'catalog_path', label: 'Каталог'},
+  {key: 'exclusive_mb', label: 'Освободится, МБ', num: true, dec: 1, sort: true},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'exec_count', label: 'Запусков', num: true},
+  {key: 'confidence', label: 'Уверенность'},
+];
+const TABLE_COLS = [
+  {key: 'full_name', label: 'Таблица', wide: true},
+  {key: 'schema_name', label: 'Схема'},
+  {key: 'report_count', label: 'Отчётов', num: true, sort: true},
+  {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1},
+  {key: 'row_count', label: 'Строк', num: true},
+  {key: 'is_orphan', label: 'Сирота', bool: true},
+];
+
+const getters = {
+  reports: makeTable({
+    el: 't-reports', rows: DATA.reports, cols: REPORT_COLS,
+    search: document.getElementById('q-reports'),
+    filter: document.getElementById('f-folder'),
+    filterField: 'folder', filterLabel: 'Все папки',
+  }),
+  candidates: makeTable({
+    el: 't-candidates', rows: DATA.candidates, cols: CANDIDATE_COLS,
+    search: document.getElementById('q-candidates'),
+    filter: document.getElementById('f-confidence'),
+    filterField: 'confidence', filterLabel: 'Любая уверенность',
+  }),
+  tables: makeTable({
+    el: 't-tables', rows: DATA.tables, cols: TABLE_COLS,
+    search: document.getElementById('q-tables'),
+    filter: document.getElementById('f-schema'),
+    filterField: 'schema_name', filterLabel: 'Все схемы',
+  }),
+};
+
+const COLS = {reports: REPORT_COLS, candidates: CANDIDATE_COLS, tables: TABLE_COLS};
+
+/* --- Выгрузка текущей выборки в CSV ------------------------------------- */
+document.querySelectorAll('button.csv').forEach(btn => {
+  btn.onclick = () => {
+    const name = btn.dataset.csv;
+    const cols = COLS[name];
+    const rows = getters[name]();
+    const cell = v => {
+      const s = v === null || v === undefined ? '' : String(v);
+      return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const csv = [cols.map(c => cell(c.label)).join(';')]
+      .concat(rows.map(r => cols.map(c => cell(r[c.key])).join(';')))
+      .join('\r\n');
+    // BOM — чтобы Excel открыл кириллицу без плясок с кодировкой.
+    const blob = new Blob(['﻿' + csv], {type: 'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name + '.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+});
+</script>
+</body>
+</html>
