@@ -24,16 +24,27 @@ st.info(FOOTPRINT_HINT)
 
 df = query("SELECT * FROM v_report_footprint")
 
-folders = ["(все)"] + sorted(df["folder_l1"].dropna().unique().tolist())
-f1, f2, f3 = st.columns([2, 2, 3])
-folder = f1.selectbox("Папка каталога", folders)
-min_coverage = f2.slider(
+def options(column: str) -> list[str]:
+    return ["(все)"] + sorted(df[column].dropna().unique().tolist())
+
+
+f1, f2, f3 = st.columns(3)
+network = f1.selectbox("Торговая сеть", options("network"))
+plant = f2.selectbox("Завод", options("plant"))
+folder = f3.selectbox("Папка каталога", options("folder_l1"))
+
+f4, f5 = st.columns([2, 3])
+min_coverage = f4.slider(
     "Мин. покрытие размерами, %", 0, 100, 0,
     help="Отсекает отчёты, по которым размеры известны слишком частично.",
 )
-search = f3.text_input("Поиск по имени отчёта", "")
+search = f5.text_input("Поиск по имени отчёта", "")
 
 view = df.copy()
+if network != "(все)":
+    view = view[view["network"] == network]
+if plant != "(все)":
+    view = view[view["plant"] == plant]
 if folder != "(все)":
     view = view[view["folder_l1"] == folder]
 if min_coverage:
@@ -49,8 +60,9 @@ k2.metric(
     help="Сумма exclusive_mb — корректно суммируется, общие таблицы не дублируются.",
 )
 k3.metric(
-    "Медианный exclusive_mb",
-    f"{view['exclusive_mb'].median():,.1f}".replace(",", " ") if len(view) else "—",
+    "Доля базы данных",
+    f"{view['exclusive_pct_of_db'].sum():.2f}%" if len(view) else "—",
+    help="Какую часть всей БД занимают эксклюзивные таблицы этих отчётов.",
 )
 
 st.subheader("Топ-20 отчётов по освобождаемому объёму")
@@ -130,6 +142,8 @@ shown = show_table(
         "exclusive_mb": st.column_config.NumberColumn("Освободится, МБ", format="%.1f"),
         "shared_mb": st.column_config.NumberColumn("Останется общим, МБ", format="%.1f"),
         "gross_mb": st.column_config.NumberColumn("Всего, МБ ⚠", format="%.1f"),
+        "exclusive_pct_of_db": st.column_config.NumberColumn("Доля БД, %", format="%.3f"),
+        "uses_view": st.column_config.CheckboxColumn("Через view"),
         "size_coverage_pct": st.column_config.ProgressColumn(
             "Покрытие размерами", min_value=0, max_value=100, format="%.0f%%"
         ),

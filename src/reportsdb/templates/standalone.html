@@ -205,6 +205,7 @@ const kpis = [
   ['Связей', fmt(k.links)],
   ['Таблиц без отчётов', fmt(k.orphans)],
   ['Объём таблиц, МБ', fmt(k.total_mb, 1)],
+  ['Доля БД под отчётами', k.pct_of_db === null ? '—' : fmt(k.pct_of_db, 1) + '%'],
   ['Покрытие размерами', k.coverage === null ? '—' : fmt(k.coverage) + '%'],
 ];
 document.getElementById('kpis').innerHTML = kpis
@@ -305,19 +306,28 @@ function makeTable(opts) {
 const REPORT_COLS = [
   {key: 'report_no', label: '№'},
   {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
   {key: 'catalog_path', label: 'Каталог'},
+  {key: 'uses_view', label: 'Через view', bool: true},
   {key: 'table_count', label: 'Таблиц', num: true},
   {key: 'exclusive_mb', label: 'exclusive_mb', num: true, dec: 1, sort: true},
   {key: 'shared_mb', label: 'shared_mb', num: true, dec: 1},
   {key: 'gross_mb', label: 'gross_mb ⚠', num: true, dec: 1},
   {key: 'size_coverage_pct', label: 'Покрытие, %', num: true, dec: 1},
+  {key: 'exclusive_pct_of_db', label: 'Доля БД, %', num: true, dec: 1},
   {key: 'exec_count', label: 'Запусков', num: true},
+  {key: 'avg_duration_sec', label: 'Ср. длит., с', num: true, dec: 1},
+  {key: 'total_duration_sec', label: 'Всего времени, с', num: true},
   {key: 'quadrant', label: 'Квадрант'},
 ];
 const CANDIDATE_COLS = [
   {key: 'report_no', label: '№'},
   {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
   {key: 'catalog_path', label: 'Каталог'},
+  {key: 'uses_view', label: 'Через view', bool: true},
   {key: 'exclusive_mb', label: 'Освободится, МБ', num: true, dec: 1, sort: true},
   {key: 'table_count', label: 'Таблиц', num: true},
   {key: 'exec_count', label: 'Запусков', num: true},

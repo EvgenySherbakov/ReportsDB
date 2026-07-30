@@ -25,7 +25,9 @@ from .excel import read_sheet
 from .normalize import (
     clean_text,
     full_name_key,
+    join_folders,
     normalise_catalog_path,
+    parse_bool,
     parse_table_list,
     split_folders,
     to_number,
@@ -40,6 +42,7 @@ class LoadStats:
     tables: int = 0
     links: int = 0
     unparsed_refs: int = 0
+    segments_skipped: int = 0
     sizes_loaded: int = 0
     sizes_unmatched: list[str] = field(default_factory=list)
     usage_loaded: int = 0
@@ -121,11 +124,17 @@ def _load_reports(
             "Запустите `profile` и поправьте config/mapping.yml."
         )
 
+    # Путь берётся из трёх колонок уровней; одна колонка «Каталог» — запасной
+    # вариант для файлов старой структуры.
+    level_cols = [cols.get("folder_l1"), cols.get("folder_l2"), cols.get("folder_l3")]
+    use_levels = any(level_cols)
+
     reports: list[tuple] = []
+    usage: list[tuple] = []
     rejects: list[tuple] = []
     tables: dict[str, tuple[int, str, str, bool]] = {}  # key → (id, schema, name, ok)
     links: set[tuple[int, int]] = set()
-    seen_reports: dict[tuple[str, str], int] = {}
+    seen_reports: dict[tuple, int] = {}
 
     for position, (_, row) in enumerate(df.iterrows()):
         source_row = position + section.header_row + 2  # +заголовок, +1-based Excel
@@ -136,8 +145,17 @@ def _load_reports(
             rejects.append((1, source_row, "Пустое имя отчёта", str(row.to_dict())[:500]))
             continue
 
-        path = normalise_catalog_path(_cell(row, cols.get("catalog_path")))
-        key = (path, name)
+        if use_levels:
+            path = join_folders(*(_cell(row, c) for c in level_cols))
+        else:
+            path = normalise_catalog_path(_cell(row, cols.get("catalog_path")))
+
+        network = clean_text(_cell(row, cols.get("network")))
+        plant = clean_text(_cell(row, cols.get("plant")))
+
+        # Одно и то же имя отчёта встречается у разных сетей и заводов —
+        # объединять такие строки нельзя, это разные отчёты.
+        key = (network, plant, path, name)
         if key in seen_reports:
             report_id = seen_reports[key]
             rejects.append(
@@ -152,17 +170,25 @@ def _load_reports(
                     report_id,
                     clean_text(_cell(row, cols.get("report_no"))),
                     name,
+                    network,
+                    plant,
                     path,
                     l1,
                     l2,
                     l3,
                     depth,
+                    parse_bool(_cell(row, cols.get("uses_view"))),
                     clean_text(_cell(row, cols.get("description"))),
                     clean_text(_cell(row, cols.get("owner"))),
                     source_row,
                 )
             )
             stats.rows_loaded += 1
+
+            execs = to_number(_cell(row, cols.get("exec_count")))
+            duration = _duration_sec(row, cols)
+            if execs is not None or duration is not None:
+                usage.append((report_id, _as_int(execs), duration))
 
         for schema_name, table_name, ok in parse_table_list(
             _cell(row, cols.get("source_tables")), section.table_separator
@@ -178,10 +204,17 @@ def _load_reports(
         con,
         "dim_report",
         reports,
-        ["report_id", "report_no", "report_name", "catalog_path", "folder_l1",
-         "folder_l2", "folder_l3", "folder_depth", "description", "owner",
-         "source_row"],
+        ["report_id", "report_no", "report_name", "network", "plant", "catalog_path",
+         "folder_l1", "folder_l2", "folder_l3", "folder_depth", "uses_view",
+         "description", "owner", "source_row"],
     )
+    _insert(
+        con,
+        "fact_report_usage",
+        usage,
+        ["report_id", "exec_count", "avg_duration_sec"],
+    )
+    stats.usage_loaded = len(usage)
     _insert(
         con,
         "dim_table",
@@ -209,9 +242,19 @@ def _load_table_sizes(
         for tid, key in con.execute("SELECT table_id, full_name FROM dim_table").fetchall()
     }
 
-    rows: list[tuple] = []
-    seen: set[int] = set()
+    # У одной таблицы в выгрузке сегментов может быть несколько строк (секции),
+    # поэтому размеры накапливаются, а не перезаписываются.
+    allowed = {t.strip().upper() for t in section.segment_types}
+    acc: dict[int, dict] = {}
+    unmatched: set[str] = set()
+
     for _, row in df.iterrows():
+        segment_type = clean_text(_cell(row, cols.get("segment_type")))
+        if allowed and segment_type is not None:
+            if segment_type.strip().upper() not in allowed:
+                stats.segments_skipped += 1
+                continue
+
         full = clean_text(_cell(row, cols.get("full_name")))
         if full is None:
             schema_name = clean_text(_cell(row, cols.get("schema_name")))
@@ -223,11 +266,8 @@ def _load_table_sizes(
         key = full.replace("[", "").replace("]", "").strip().lower()
         table_id = known.get(key)
         if table_id is None:
-            stats.sizes_unmatched.append(full)
+            unmatched.add(full)
             continue
-        if table_id in seen:
-            continue
-        seen.add(table_id)
 
         data_mb = to_number(_cell(row, cols.get("data_mb")))
         index_mb = to_number(_cell(row, cols.get("index_mb")))
@@ -235,25 +275,52 @@ def _load_table_sizes(
         if total_mb is None and (data_mb is not None or index_mb is not None):
             total_mb = (data_mb or 0.0) + (index_mb or 0.0)
 
-        rows.append(
-            (
-                table_id,
-                _as_int(to_number(_cell(row, cols.get("row_count")))),
-                data_mb,
-                index_mb,
-                total_mb,
-                clean_text(_cell(row, cols.get("measured_at"))),
-            )
+        entry = acc.setdefault(
+            table_id,
+            {"rows": None, "data": None, "index": None, "total": None,
+             "pct": None, "segments": 0, "measured": None},
         )
+        entry["segments"] += 1
+        _accumulate(entry, "total", total_mb)
+        _accumulate(entry, "data", data_mb)
+        _accumulate(entry, "index", index_mb)
+        _accumulate(entry, "pct", to_number(_cell(row, cols.get("percent_of_total"))))
+        # Число строк по секциям тоже складывается.
+        _accumulate(entry, "rows", to_number(_cell(row, cols.get("row_count"))))
+        if entry["measured"] is None:
+            entry["measured"] = clean_text(_cell(row, cols.get("measured_at")))
+
+    rows_out = [
+        (
+            table_id,
+            _as_int(e["rows"]),
+            e["data"],
+            e["index"],
+            e["total"],
+            e["pct"],
+            e["segments"],
+            e["measured"],
+        )
+        for table_id, e in acc.items()
+    ]
 
     _insert(
         con,
         "fact_table_size",
-        rows,
-        ["table_id", "row_count", "data_mb", "index_mb", "total_mb", "measured_at"],
+        rows_out,
+        ["table_id", "row_count", "data_mb", "index_mb", "total_mb",
+         "percent_of_total", "segment_count", "measured_at"],
         casts={"measured_at": "TRY_CAST(? AS DATE)"},
     )
-    stats.sizes_loaded = len(rows)
+    stats.sizes_loaded = len(rows_out)
+    stats.sizes_unmatched = sorted(unmatched)
+
+
+def _accumulate(entry: dict, key: str, value: float | None) -> None:
+    """Складывает значение сегмента, сохраняя None, если данных не было вовсе."""
+    if value is None:
+        return
+    entry[key] = value if entry[key] is None else entry[key] + value
 
 
 def _load_report_usage(
@@ -269,12 +336,17 @@ def _load_report_usage(
         raise SystemExit("В файле частоты использования нет колонки с именем отчёта.")
 
     rows_db = con.execute(
-        "SELECT report_id, report_name, catalog_path FROM dim_report"
+        "SELECT report_id, report_name, catalog_path, network, plant FROM dim_report"
     ).fetchall()
-    by_path = {(p.lower(), n.lower()): rid for rid, n, p in rows_db}
+    # Ключи сопоставления от точного к грубому: чем больше совпало, тем надёжнее.
+    by_full = {
+        (_low(net), _low(pl), _low(p), _low(n)): rid
+        for rid, n, p, net, pl in rows_db
+    }
+    by_path = {(_low(p), _low(n)): rid for rid, n, p, _, _ in rows_db}
     by_name: dict[str, list[int]] = {}
-    for rid, name, _ in rows_db:
-        by_name.setdefault(name.lower(), []).append(rid)
+    for rid, name, _, _, _ in rows_db:
+        by_name.setdefault(_low(name), []).append(rid)
 
     rows: list[tuple] = []
     seen: set[int] = set()
@@ -283,12 +355,18 @@ def _load_report_usage(
         if name is None:
             continue
 
-        report_id = None
         raw_path = clean_text(_cell(row, cols.get("catalog_path")))
-        if raw_path:
-            report_id = by_path.get((normalise_catalog_path(raw_path).lower(), name.lower()))
+        path = normalise_catalog_path(raw_path) if raw_path else None
+        network = clean_text(_cell(row, cols.get("network")))
+        plant = clean_text(_cell(row, cols.get("plant")))
+
+        report_id = None
+        if path is not None:
+            report_id = by_full.get((_low(network), _low(plant), _low(path), _low(name)))
+            if report_id is None:
+                report_id = by_path.get((_low(path), _low(name)))
         if report_id is None:
-            candidates = by_name.get(name.lower(), [])
+            candidates = by_name.get(_low(name), [])
             # Неоднозначное имя без пути сопоставлять нельзя — данные ушли бы не туда.
             report_id = candidates[0] if len(candidates) == 1 else None
         if report_id is None:
@@ -303,26 +381,42 @@ def _load_report_usage(
                 report_id,
                 _as_int(to_number(_cell(row, cols.get("exec_count")))),
                 _as_int(to_number(_cell(row, cols.get("distinct_users")))),
-                to_number(_cell(row, cols.get("avg_duration_ms"))),
+                _duration_sec(row, cols),
                 clean_text(_cell(row, cols.get("last_executed_at"))),
                 clean_text(_cell(row, cols.get("period_start"))),
                 clean_text(_cell(row, cols.get("period_end"))),
             )
         )
 
+    # OR REPLACE: отдельный файл статистики перекрывает значения, взятые из
+    # основного файла, — он считается более свежим источником.
     _insert(
         con,
         "fact_report_usage",
         rows,
-        ["report_id", "exec_count", "distinct_users", "avg_duration_ms",
+        ["report_id", "exec_count", "distinct_users", "avg_duration_sec",
          "last_executed_at", "period_start", "period_end"],
         casts={
             "last_executed_at": "TRY_CAST(? AS DATE)",
             "period_start": "TRY_CAST(? AS DATE)",
             "period_end": "TRY_CAST(? AS DATE)",
         },
+        replace=True,
     )
-    stats.usage_loaded = len(rows)
+    stats.usage_loaded = max(stats.usage_loaded, len(rows))
+
+
+def _low(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _duration_sec(row: pd.Series, cols: dict[str, str | None]) -> float | None:
+    """Средняя длительность в секундах. Колонку в мс переводит в секунды."""
+    seconds = to_number(_cell(row, cols.get("avg_duration_sec")))
+    if seconds is not None:
+        return seconds
+    millis = to_number(_cell(row, cols.get("avg_duration_ms")))
+    return None if millis is None else millis / 1000.0
 
 
 def _section_file(section: SectionConfig) -> Path | None:
@@ -346,13 +440,15 @@ def _insert(
     rows: list[tuple],
     columns: list[str],
     casts: dict[str, str] | None = None,
+    replace: bool = False,
 ) -> None:
     if not rows:
         return
     casts = casts or {}
     placeholders = ", ".join(casts.get(col, "?") for col in columns)
+    verb = "INSERT OR REPLACE INTO" if replace else "INSERT INTO"
     con.executemany(
-        f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})", rows
+        f"{verb} {table} ({', '.join(columns)}) VALUES ({placeholders})", rows
     )
 
 
@@ -367,6 +463,8 @@ def print_summary(stats: LoadStats) -> None:
         print(f"  !  ссылок без схемы: {stats.unparsed_refs} (схема = '(unknown)')")
     if stats.sizes_loaded or stats.sizes_unmatched:
         print(f"  размеров таблиц  : {stats.sizes_loaded}")
+        if stats.segments_skipped:
+            print(f"     пропущено сегментов не-табличных типов: {stats.segments_skipped}")
         if stats.sizes_unmatched:
             preview = ", ".join(stats.sizes_unmatched[:5])
             print(f"  !  размеры без совпадения: {len(stats.sizes_unmatched)} ({preview}…)")

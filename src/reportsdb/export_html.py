@@ -18,10 +18,12 @@ TEMPLATE = Path(__file__).parent / "templates" / "standalone.html"
 
 QUERIES = {
     "reports": """
-        SELECT f.report_id, f.report_no, f.report_name, f.catalog_path,
-               COALESCE(f.folder_l1, '(корень)') AS folder,
-               f.table_count, f.exclusive_mb, f.gross_mb, f.shared_mb,
-               f.size_coverage_pct, c.exec_count, c.quadrant
+        SELECT f.report_id, f.report_no, f.report_name,
+               COALESCE(f.network, '—') AS network, COALESCE(f.plant, '—') AS plant,
+               f.catalog_path, COALESCE(f.folder_l1, '(корень)') AS folder,
+               f.uses_view, f.table_count, f.exclusive_mb, f.gross_mb, f.shared_mb,
+               f.exclusive_pct_of_db, f.size_coverage_pct,
+               c.exec_count, c.avg_duration_sec, c.total_duration_sec, c.quadrant
         FROM v_report_footprint f
         LEFT JOIN v_report_cost_value c ON c.report_id = f.report_id
         ORDER BY f.exclusive_mb DESC
@@ -32,12 +34,14 @@ QUERIES = {
         ORDER BY report_count DESC, total_mb DESC NULLS LAST
     """,
     "candidates": """
-        SELECT report_no, report_name, catalog_path, exclusive_mb, table_count,
-               exec_count, confidence
+        SELECT report_no, report_name, COALESCE(network, '—') AS network,
+               COALESCE(plant, '—') AS plant, catalog_path, uses_view,
+               exclusive_mb, exclusive_pct_of_db, table_count, exec_count, confidence
         FROM v_decommission_candidates
         LIMIT 200
     """,
     "catalog": "SELECT * FROM v_catalog_overview",
+    "networks": "SELECT * FROM v_network_overview",
 }
 
 KPI_SQL = """
@@ -48,6 +52,7 @@ SELECT
     (SELECT COUNT(*) FROM v_table_criticality WHERE is_orphan) AS orphans,
     (SELECT ROUND(SUM(total_mb), 1) FROM fact_table_size)      AS total_mb,
     (SELECT ROUND(AVG(size_coverage_pct), 0) FROM v_report_footprint) AS coverage,
+    (SELECT ROUND(SUM(exclusive_pct_of_db), 2) FROM v_report_footprint) AS pct_of_db,
     (SELECT source_file FROM etl_run ORDER BY run_id DESC LIMIT 1)    AS source_file
 """
 

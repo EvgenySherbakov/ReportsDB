@@ -42,6 +42,36 @@ def split_folders(catalog_path: str) -> tuple[str | None, str | None, str | None
     return levels[0], levels[1], levels[2], len(parts)
 
 
+def join_folders(*levels: Any) -> str:
+    """Собирает путь из отдельных колонок уровней каталога.
+
+    Пустые уровни пропускаются: («Продажи», None, «Месяц») → «/Продажи/Месяц».
+    """
+    parts = [clean_text(level) for level in levels]
+    filled = [p.replace("/", "-").strip() for p in parts if p]
+    return "/" + "/".join(filled) if filled else "/"
+
+
+_TRUE = {"да", "yes", "y", "true", "1", "+", "истина", "есть", "v", "х", "x"}
+_FALSE = {"нет", "no", "n", "false", "0", "-", "ложь", "отсутствует", "—"}
+
+
+def parse_bool(value: Any) -> bool | None:
+    """Признак «да/нет» из ячейки. Непонятное значение → None, а не False.
+
+    Разница принципиальна: «неизвестно» и «нет» ведут к разным выводам.
+    """
+    text = clean_text(value)
+    if text is None:
+        return None
+    key = text.strip().lower().replace("ё", "е")
+    if key in _TRUE:
+        return True
+    if key in _FALSE:
+        return False
+    return None
+
+
 def parse_table_ref(raw: Any) -> tuple[str, str, bool] | None:
     """`[dbo].[Orders]` → (`dbo`, `Orders`, True).
 

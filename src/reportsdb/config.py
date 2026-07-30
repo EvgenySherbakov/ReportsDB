@@ -30,6 +30,8 @@ class SectionConfig:
     header_row: int = 0
     columns: dict[str, list[str]] = field(default_factory=dict)
     table_separator: str = ";"
+    # Типы сегментов, которые считаются объёмом таблицы (см. mapping.yml).
+    segment_types: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "SectionConfig":
@@ -44,6 +46,7 @@ class SectionConfig:
             header_row=int(raw.get("header_row") or 0),
             columns=columns,
             table_separator=raw.get("table_separator") or ";",
+            segment_types=[str(v) for v in (raw.get("segment_types") or [])],
         )
 
 

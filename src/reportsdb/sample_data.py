@@ -11,15 +11,19 @@ import pandas as pd
 
 from .config import RAW_DIR
 
-FOLDERS = [
-    "/Finance/Monthly",
-    "/Finance/Daily",
-    "/Sales/Regional",
-    "/Sales/Executive",
-    "/Operations/Warehouse",
-    "/Operations/Logistics",
-    "/HR",
+# Каталог приходит тремя отдельными колонками — уровнями пути пользователя.
+FOLDER_LEVELS = [
+    ("Финансы", "Ежемесячные", "Продажи"),
+    ("Финансы", "Ежедневные", ""),
+    ("Продажи", "Региональные", "Детализация"),
+    ("Продажи", "Руководству", ""),
+    ("Логистика", "Склад", "Комплектация"),
+    ("Логистика", "Перевозки", ""),
+    ("Персонал", "", ""),
 ]
+
+NETWORKS = ["СЕТЬ-А", "СЕТЬ-Б", "СЕТЬ-В"]
+PLANTS = ["Завод 1", "Завод 2", "Завод 3", "Завод 4"]
 
 SCHEMAS = ["dbo", "sales", "fin", "ops", "stg"]
 ENTITIES = [
@@ -83,58 +87,97 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
         if i % 29 == 0 and picked:
             picked[-1] = f"ReportDW.{picked[-1]}"
 
+        l1, l2, l3 = rnd.choice(FOLDER_LEVELS)
+        execs = 0 if rnd.random() < 0.22 else int(rnd.lognormvariate(3.2, 1.5))
         rows.append(
             {
                 "№": i + 1,
+                "ТС": rnd.choice(NETWORKS),
+                "Завод": rnd.choice(PLANTS),
+                "Каталог 1-го уровня": l1,
+                "Каталог 2-го уровня": l2,
+                "Каталог 3-го уровня": l3,
                 "Наименование отчета": name,
-                "Каталог": rnd.choice(FOLDERS),
+                "Используется view": rnd.choice(["да", "нет", "нет", "нет"]),
                 "Таблицы источники данных": ";".join(picked),
-                "Owner": rnd.choice(["a.ivanov", "s.petrova", "d.kuznetsov", ""]),
+                "Ср. дл. (сек)": round(rnd.lognormvariate(1.6, 1.2), 1),
+                "Кол-во обращений": execs,
             }
         )
 
     # Пара проблемных строк — проверка отбраковки.
     n = len(rows)
-    rows.append({"№": n + 1, "Наименование отчета": "", "Каталог": "/Finance",
-                 "Таблицы источники данных": "dbo.Orders", "Owner": ""})
-    rows.append({"№": n + 2, "Наименование отчета": "Report Without Sources",
-                 "Каталог": "/HR", "Таблицы источники данных": "", "Owner": ""})
+    blank = {k: "" for k in rows[0]}
+    rows.append({**blank, "№": n + 1, "Каталог 1-го уровня": "Финансы",
+                 "Таблицы источники данных": "dbo.Orders"})
+    rows.append({**blank, "№": n + 2, "Наименование отчета": "Report Without Sources",
+                 "Каталог 1-го уровня": "Персонал", "Кол-во обращений": 0})
 
     reports_path = RAW_DIR / "sample_reports.xlsx"
     pd.DataFrame(rows).to_excel(reports_path, index=False)
 
-    sizes = []
+    # Файл размеров повторяет выгрузку сегментов БД: строка на сегмент,
+    # у части таблиц несколько секций, есть индексы и LOB-сегменты.
+    segments = []
     for t in all_tables:
         # Часть таблиц намеренно без размера — проверка size_coverage_pct.
         if rnd.random() < 0.12:
             continue
-        data_mb = round(rnd.lognormvariate(3.0, 1.6), 2)
-        sizes.append(
-            {
-                "Table": t,
-                "Rows": int(data_mb * rnd.randint(800, 4000)),
-                "Data MB": data_mb,
-                "Index MB": round(data_mb * rnd.uniform(0.1, 0.6), 2),
-                "Measured At": "2026-07-01",
-            }
-        )
-    sizes_path = RAW_DIR / "sample_table_sizes.xlsx"
-    pd.DataFrame(sizes).to_excel(sizes_path, index=False)
+        owner, table_name = t.split(".", 1)
+        parts = 1 if rnd.random() < 0.85 else rnd.randint(2, 4)
+        for part in range(parts):
+            size_mb = round(rnd.lognormvariate(3.0, 1.6), 2)
+            segments.append(
+                {
+                    "OWNER": owner.upper(),
+                    "SEGMENT_NAME": table_name.upper(),
+                    "SEGMENT_TYPE": "TABLE" if parts == 1 else "TABLE PARTITION",
+                    "SIZE_MB": size_mb,
+                    "PERCENT_OF_TOTAL": None,
+                    "PERCENT_OF_SCHEMA": None,
+                }
+            )
+        # Индексный сегмент: имя своё, к таблице по выгрузке не привязывается.
+        if rnd.random() < 0.5:
+            segments.append(
+                {
+                    "OWNER": owner.upper(),
+                    "SEGMENT_NAME": f"IDX_{table_name.upper()}",
+                    "SEGMENT_TYPE": "INDEX",
+                    "SIZE_MB": round(rnd.lognormvariate(2.0, 1.2), 2),
+                    "PERCENT_OF_TOTAL": None,
+                    "PERCENT_OF_SCHEMA": None,
+                }
+            )
 
+    total = sum(s["SIZE_MB"] for s in segments)
+    for i, seg in enumerate(segments, start=1):
+        seg["№"] = i
+        seg["PERCENT_OF_TOTAL"] = round(100.0 * seg["SIZE_MB"] / total, 4)
+        seg["PERCENT_OF_SCHEMA"] = None
+    order = ["№", "OWNER", "SEGMENT_NAME", "SEGMENT_TYPE", "SIZE_MB",
+             "PERCENT_OF_TOTAL", "PERCENT_OF_SCHEMA"]
+    sizes_path = RAW_DIR / "sample_table_sizes.xlsx"
+    pd.DataFrame(segments)[order].to_excel(sizes_path, index=False)
+
+    # Отдельный файл статистики: нужен, только если данных нет в основном
+    # файле либо есть поля, которых там нет (пользователи, границы периода).
+    # Здесь он покрывает часть отчётов — так проверяется перекрытие значений.
     usage = []
     for row in rows:
         if not row["Наименование отчета"]:
             continue
-        if rnd.random() < 0.15:  # часть отчётов вовсе без статистики
+        if rnd.random() < 0.4:
             continue
-        execs = 0 if rnd.random() < 0.25 else int(rnd.lognormvariate(3.2, 1.5))
+        execs = row["Кол-во обращений"] or 0
         usage.append(
             {
-                "Report Name": row["Наименование отчета"],
-                "Path": row["Каталог"],
-                "Executions": execs,
-                "Users": max(0, min(execs, int(execs * rnd.uniform(0.1, 0.5)))),
-                "Avg Duration Ms": round(rnd.lognormvariate(7.5, 1.0), 0),
+                "Наименование отчета": row["Наименование отчета"],
+                "ТС": row["ТС"],
+                "Завод": row["Завод"],
+                "Кол-во обращений": execs,
+                "Users": max(0, int(execs * rnd.uniform(0.1, 0.5))),
+                "Ср. дл. (сек)": row["Ср. дл. (сек)"],
                 "Last Executed": "" if execs == 0 else "2026-07-20",
                 "Period Start": "2026-01-01",
                 "Period End": "2026-06-30",

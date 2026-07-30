@@ -37,6 +37,8 @@ shown = show_table(
     {
         "exclusive_mb": st.column_config.NumberColumn("Освободится, МБ", format="%.1f"),
         "gross_mb": st.column_config.NumberColumn("Всего, МБ ⚠", format="%.1f"),
+        "uses_view": st.column_config.CheckboxColumn("Через view"),
+        "exclusive_pct_of_db": st.column_config.NumberColumn("Доля БД, %", format="%.3f"),
         "size_coverage_pct": st.column_config.ProgressColumn(
             "Покрытие размерами", min_value=0, max_value=100, format="%.0f%%"
         ),

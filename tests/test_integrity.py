@@ -22,7 +22,9 @@ from reportsdb.config import (  # noqa: E402
 )
 from reportsdb.etl import build  # noqa: E402
 from reportsdb.normalize import (  # noqa: E402
+    join_folders,
     normalise_catalog_path,
+    parse_bool,
     parse_table_list,
     parse_table_ref,
 )
@@ -35,6 +37,7 @@ VIEWS = [
     "v_decommission_candidates",
     "v_catalog_overview",
     "v_schema_overview",
+    "v_network_overview",
     "v_report_overlap",
 ]
 
@@ -113,16 +116,130 @@ def test_normalise_catalog_path(raw, expected):
 
 
 def test_real_headers_from_customer_file_resolve():
-    """Фактические заголовки из файла заказчика должны сопоставляться без правок.
+    """Фактические заголовки файла отчётов сопоставляются без правок конфига.
 
     «Наименование отчета» пишется без «ё» — сопоставление это учитывает.
     """
-    headers = ["№", "Наименование отчета", "Каталог", "Таблицы источники данных"]
+    headers = [
+        "№", "ТС", "Завод", "Каталог 1-го уровня", "Каталог 2-го уровня",
+        "Каталог 3-го уровня", "Наименование отчета", "Используется view",
+        "Таблицы источники данных", "Ср. дл. (сек)", "Кол-во обращений",
+    ]
     resolved = resolve_columns(headers, load_mapping().reports.columns)
     assert resolved["report_no"] == "№"
+    assert resolved["network"] == "ТС"
+    assert resolved["plant"] == "Завод"
+    assert resolved["folder_l1"] == "Каталог 1-го уровня"
+    assert resolved["folder_l2"] == "Каталог 2-го уровня"
+    assert resolved["folder_l3"] == "Каталог 3-го уровня"
     assert resolved["report_name"] == "Наименование отчета"
-    assert resolved["catalog_path"] == "Каталог"
+    assert resolved["uses_view"] == "Используется view"
     assert resolved["source_tables"] == "Таблицы источники данных"
+    assert resolved["avg_duration_sec"] == "Ср. дл. (сек)"
+    assert resolved["exec_count"] == "Кол-во обращений"
+
+
+def test_segment_export_headers_resolve():
+    """Заголовки выгрузки сегментов БД сопоставляются без правок конфига."""
+    headers = ["№", "OWNER", "SEGMENT_NAME", "SEGMENT_TYPE", "SIZE_MB",
+               "PERCENT_OF_TOTAL", "PERCENT_OF_SCHEMA"]
+    resolved = resolve_columns(headers, load_mapping().table_sizes.columns)
+    assert resolved["schema_name"] == "OWNER"
+    assert resolved["table_name"] == "SEGMENT_NAME"
+    assert resolved["segment_type"] == "SEGMENT_TYPE"
+    assert resolved["total_mb"] == "SIZE_MB"
+    assert resolved["percent_of_total"] == "PERCENT_OF_TOTAL"
+
+
+@pytest.mark.parametrize(
+    "levels,expected",
+    [
+        (("Финансы", "Месяц", "Продажи"), "/Финансы/Месяц/Продажи"),
+        (("Финансы", "", ""), "/Финансы"),
+        (("Финансы", None, "Продажи"), "/Финансы/Продажи"),  # пустой уровень пропускается
+        ((None, None, None), "/"),
+        (("A/B", "C", None), "/A-B/C"),  # слэш внутри уровня не ломает путь
+    ],
+)
+def test_join_folders(levels, expected):
+    assert join_folders(*levels) == expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("да", True), ("Да", True), ("ДА", True), ("yes", True), ("1", True), ("+", True),
+        ("нет", False), ("Нет", False), ("no", False), ("0", False), ("-", False),
+        ("", None), (None, None), ("может быть", None),  # непонятное — не False
+    ],
+)
+def test_parse_bool(raw, expected):
+    assert parse_bool(raw) is expected
+
+
+def test_uses_view_and_org_dimensions_loaded(full_db):
+    row = full_db.execute(
+        "SELECT COUNT(*) FILTER (WHERE network IS NOT NULL), "
+        "       COUNT(*) FILTER (WHERE plant IS NOT NULL), "
+        "       COUNT(*) FILTER (WHERE uses_view IS NOT NULL) FROM dim_report"
+    ).fetchone()
+    assert all(v > 0 for v in row), "ТС, завод и признак view должны загружаться"
+
+
+def test_same_report_name_kept_per_plant(full_db):
+    """Одно имя отчёта у разных заводов — разные строки, а не одна."""
+    collapsed = full_db.execute(
+        "SELECT COUNT(*) FROM (SELECT report_name FROM dim_report "
+        "GROUP BY report_name HAVING COUNT(DISTINCT plant) > 1 AND COUNT(*) = 1)"
+    ).fetchone()[0]
+    assert collapsed == 0
+
+
+def test_segments_are_summed_not_overwritten(full_db):
+    """Секции одной таблицы складываются, а не затирают друг друга."""
+    multi = full_db.execute(
+        "SELECT COUNT(*) FROM fact_table_size WHERE segment_count > 1"
+    ).fetchone()[0]
+    assert multi > 0, "в демо-данных есть секционированные таблицы"
+    bad = full_db.execute(
+        "SELECT COUNT(*) FROM fact_table_size WHERE segment_count > 1 AND total_mb IS NULL"
+    ).fetchone()[0]
+    assert bad == 0
+
+
+def test_index_segments_are_not_counted_as_tables(full_db):
+    """Индексные сегменты не должны попадать в размеры таблиц."""
+    leaked = full_db.execute(
+        "SELECT COUNT(*) FROM dim_table WHERE table_name ILIKE 'IDX!_%' ESCAPE '!'"
+    ).fetchone()[0]
+    assert leaked == 0
+
+
+def test_usage_comes_from_main_file(full_db):
+    """Частота и длительность приходят из основного файла, без отдельного."""
+    filled = full_db.execute(
+        "SELECT COUNT(*) FROM fact_report_usage WHERE exec_count IS NOT NULL"
+    ).fetchone()[0]
+    assert filled > 0
+
+
+def test_duration_is_seconds_not_milliseconds(full_db):
+    """Длительность хранится в секундах — как в исходном файле."""
+    worst = full_db.execute(
+        "SELECT MAX(avg_duration_sec) FROM fact_report_usage"
+    ).fetchone()[0]
+    assert worst is not None and worst < 100000, (
+        "значения похожи на миллисекунды — проверьте перевод единиц"
+    )
+
+
+def test_view_reports_get_low_confidence(full_db):
+    """Отчёт через view не может получить высокую уверенность вывода."""
+    bad = full_db.execute(
+        "SELECT COUNT(*) FROM v_decommission_candidates "
+        "WHERE uses_view AND confidence = 'Высокая'"
+    ).fetchone()[0]
+    assert bad == 0
 
 
 def test_report_no_is_loaded(full_db):
@@ -246,11 +363,23 @@ def test_footprint_is_zero_without_sizes(bare_db):
     assert total == 0
 
 
-def test_quadrant_says_no_usage_data(bare_db):
+def test_footprint_survives_without_size_file(bare_db):
+    """Без файла размеров объёмы нулевые, но витрины считаются."""
+    rows = bare_db.execute(
+        "SELECT COUNT(*), COUNT(*) FILTER (WHERE exclusive_mb = 0) FROM v_report_footprint"
+    ).fetchone()
+    assert rows[0] == rows[1] > 0
+
+
+def test_quadrants_use_usage_from_main_file(bare_db):
+    """Статистика лежит в основном файле, поэтому квадранты считаются и без
+    отдельного файла статистики."""
     quadrants = {
-        row[0] for row in bare_db.execute("SELECT DISTINCT quadrant FROM v_report_cost_value").fetchall()
+        row[0] for row in bare_db.execute(
+            "SELECT DISTINCT quadrant FROM v_report_cost_value"
+        ).fetchall()
     }
-    assert quadrants == {"Нет данных об использовании"}
+    assert quadrants - {"Нет данных об использовании"}
 
 
 # --- Экспорт HTML ---------------------------------------------------------

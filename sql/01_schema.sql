@@ -2,6 +2,7 @@
 -- Скрипт выполняется на чистой БД (ETL пересоздаёт файл), но написан идемпотентно.
 
 DROP VIEW IF EXISTS v_report_overlap;
+DROP VIEW IF EXISTS v_network_overview;
 DROP VIEW IF EXISTS v_schema_overview;
 DROP VIEW IF EXISTS v_catalog_overview;
 DROP VIEW IF EXISTS v_decommission_candidates;
@@ -24,15 +25,25 @@ CREATE TABLE dim_report (
     -- значения вида «1.2». Служит для поиска отчёта в оригинальном файле.
     report_no    VARCHAR,
     report_name  VARCHAR NOT NULL,
+    -- Организационный разрез: торговая сеть и завод внутри неё.
+    network      VARCHAR,
+    plant        VARCHAR,
+    -- Путь пользователя к отчёту. Приходит тремя колонками; catalog_path
+    -- собирается из них для отображения и поиска.
     catalog_path VARCHAR,
     folder_l1    VARCHAR,
     folder_l2    VARCHAR,
     folder_l3    VARCHAR,
     folder_depth INTEGER,
+    -- Отчёт обращается к данным через view. Если да, список таблиц-источников
+    -- заведомо неполон: за view могут стоять другие таблицы.
+    uses_view    BOOLEAN,
     description  VARCHAR,
     owner        VARCHAR,
     source_row   INTEGER,
-    UNIQUE (catalog_path, report_name)
+    -- Один и тот же отчёт может существовать для разных сетей и заводов,
+    -- поэтому они входят в ключ уникальности.
+    UNIQUE (network, plant, catalog_path, report_name)
 );
 
 -- Таблицы-источники -------------------------------------------------------
@@ -58,18 +69,27 @@ CREATE TABLE fact_table_size (
     data_mb     DOUBLE,
     index_mb    DOUBLE,
     total_mb    DOUBLE,
+    -- Доля таблицы в общем объёме БД, %. Приходит из выгрузки сегментов и
+    -- суммируется так же, как размер: по всем сегментам одной таблицы.
+    percent_of_total DOUBLE,
+    -- Сколько строк выгрузки сегментов сложилось в эту таблицу (секции и т.п.).
+    segment_count INTEGER,
     measured_at DATE
 );
 
--- Частота использования отчётов (заполняется, когда появятся данные) -------
+-- Использование отчётов ---------------------------------------------------
+-- Заполняется либо из основного файла (колонки «Кол-во обращений» и
+-- «Ср. дл. (сек)»), либо из отдельного файла статистики.
 CREATE TABLE fact_report_usage (
-    report_id       INTEGER PRIMARY KEY,
-    exec_count      BIGINT,
-    distinct_users  INTEGER,
-    avg_duration_ms DOUBLE,
+    report_id        INTEGER PRIMARY KEY,
+    exec_count       BIGINT,
+    distinct_users   INTEGER,
+    -- Средняя длительность выборки в СЕКУНДАХ — в таком виде приходит из
+    -- исходного файла, в таком же и хранится.
+    avg_duration_sec DOUBLE,
     last_executed_at DATE,
-    period_start    DATE,
-    period_end      DATE
+    period_start     DATE,
+    period_end       DATE
 );
 
 -- Журнал загрузок ---------------------------------------------------------
