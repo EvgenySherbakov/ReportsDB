@@ -2,6 +2,9 @@
 
 Коллеге не нужна командная строка: положить файлы в data/raw/ (или перетащить
 их сюда), выбрать, что чем является, и нажать «Загрузить».
+
+Страница проверяет колонки **всех** выбранных файлов до загрузки и честно
+показывает, какая аналитика будет недоступна из-за ненайденных колонок.
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 import streamlit as st
 
@@ -23,6 +27,59 @@ page_setup("Загрузка данных", "📥")
 SUFFIXES = {".xlsx", ".xls", ".xlsm", ".csv", ".tsv"}
 NO_FILE = "— не загружать —"
 
+# Что означает каждое поле модели и что сломается без него. Группы совпадают со
+# смысловыми блоками исходного файла, чтобы таблицу проверки было легко читать.
+REPORT_FIELDS = [
+    ("report_name", "Наименование отчёта", "Обязательное", "Без него загрузка невозможна"),
+    ("source_tables", "Таблицы источники данных", "Обязательное по смыслу",
+     "Без него не будет анализа объёма: связей отчёт↔таблица не возникнет"),
+    ("report_no", "№", "Ссылка на исходник", "Не найти строку в оригинальной таблице"),
+    ("network", "ТС", "Организация", "Не будет разреза по торговым сетям"),
+    ("plant", "Завод", "Организация", "Не будет разреза по заводам"),
+    ("folder_l1", "Каталог 1-го уровня", "Каталог", "Не будет группировки по каталогу"),
+    ("folder_l2", "Каталог 2-го уровня", "Каталог", "Путь будет короче"),
+    ("folder_l3", "Каталог 3-го уровня", "Каталог", "Путь будет короче"),
+    ("catalog_path", "Каталог одной колонкой", "Каталог (запасной вариант)",
+     "Используется, только если уровни 1–3 не найдены"),
+    ("uses_view", "Используется view", "Достоверность",
+     "Не отметить отчёты, у которых список таблиц заведомо неполон"),
+    ("exec_count", "Кол-во обращений", "Статистика",
+     "Не определить невостребованные отчёты"),
+    ("avg_duration_sec", "Ср. дл. (сек)", "Статистика",
+     "Не будет анализа времени выполнения"),
+    ("avg_duration_ms", "Длительность в мс", "Статистика (запасной вариант)",
+     "Используется, если нет колонки в секундах"),
+    ("description", "Описание", "Дополнительно", "—"),
+    ("owner", "Владелец", "Дополнительно", "—"),
+]
+
+SIZE_FIELDS = [
+    ("schema_name", "OWNER — схема", "Обязательное", "Не сопоставить таблицу с отчётом"),
+    ("table_name", "SEGMENT_NAME — имя сегмента", "Обязательное",
+     "Не сопоставить таблицу с отчётом"),
+    ("total_mb", "SIZE_MB — размер", "Обязательное", "Не будет объёмов вообще"),
+    ("segment_type", "SEGMENT_TYPE — тип сегмента", "Важное",
+     "Без него индексы и LOB попадут в размер таблиц и завысят его"),
+    ("percent_of_total", "PERCENT_OF_TOTAL — доля в БД", "Полезное",
+     "Не показать долю отчёта в общем объёме базы"),
+    ("full_name", "Схема.таблица одной колонкой", "Запасной вариант",
+     "Используется, если нет пары OWNER/SEGMENT_NAME"),
+    ("row_count", "Число строк", "Дополнительно", "—"),
+    ("measured_at", "Дата замера", "Дополнительно", "—"),
+]
+
+USAGE_FIELDS = [
+    ("report_name", "Наименование отчёта", "Обязательное", "Не сопоставить со справочником"),
+    ("network", "ТС", "Точность сопоставления", "Возможны ошибки при совпадении имён"),
+    ("plant", "Завод", "Точность сопоставления", "Возможны ошибки при совпадении имён"),
+    ("exec_count", "Кол-во обращений", "Статистика", "—"),
+    ("avg_duration_sec", "Ср. дл. (сек)", "Статистика", "—"),
+    ("distinct_users", "Пользователей", "Дополнительно", "—"),
+    ("last_executed_at", "Последний запуск", "Дополнительно", "—"),
+    ("period_start", "Начало периода", "Дополнительно", "—"),
+    ("period_end", "Конец периода", "Дополнительно", "—"),
+]
+
 
 def raw_files() -> list[str]:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -32,6 +89,32 @@ def raw_files() -> list[str]:
     )
 
 
+def mapping_report(resolved: dict, spec: list[tuple]) -> tuple[pd.DataFrame, list[str]]:
+    """Таблица «поле → колонка файла» и список потерь от ненайденных колонок."""
+    rows, losses = [], []
+    for field, human, group, consequence in spec:
+        column = resolved.get(field)
+        rows.append(
+            {
+                "Что ожидается": human,
+                "Колонка в файле": column or "— не найдена —",
+                "": "✅" if column else "•",
+                "Группа": group,
+            }
+        )
+        if column is None and consequence != "—" and "запасной" not in group.lower():
+            losses.append(f"**{human}** — {consequence}")
+    return pd.DataFrame(rows), losses
+
+
+def show_mapping(title: str, resolved: dict, spec: list[tuple]) -> list[str]:
+    table, losses = mapping_report(resolved, spec)
+    found = int((table[""] == "✅").sum())
+    st.caption(f"{title}: найдено {found} из {len(spec)} колонок.")
+    st.dataframe(table, use_container_width=True, hide_index=True)
+    return losses
+
+
 # --- Текущее состояние базы ------------------------------------------------
 
 st.subheader("Текущее состояние")
@@ -39,8 +122,6 @@ st.subheader("Текущее состояние")
 if not DB_PATH.exists():
     st.info("База ещё не собрана. Загрузите файл с отчётами — это займёт секунды.")
 else:
-    import duckdb
-
     probe = duckdb.connect(str(DB_PATH), read_only=True)
     try:
         run = probe.execute(
@@ -48,17 +129,25 @@ else:
             "ORDER BY run_id DESC LIMIT 1"
         ).fetchone()
         counts = probe.execute(
-            "SELECT (SELECT COUNT(*) FROM dim_report), (SELECT COUNT(*) FROM dim_table), "
-            "(SELECT COUNT(*) FROM fact_table_size), (SELECT COUNT(*) FROM fact_report_usage)"
+            """
+            SELECT (SELECT COUNT(*) FROM dim_report),
+                   (SELECT COUNT(*) FROM dim_table),
+                   (SELECT COUNT(*) FROM fact_table_size),
+                   (SELECT COUNT(*) FROM fact_report_usage WHERE exec_count IS NOT NULL),
+                   (SELECT COUNT(*) FROM dim_report WHERE uses_view),
+                   (SELECT COUNT(DISTINCT network) FROM dim_report WHERE network IS NOT NULL)
+            """
         ).fetchone()
     finally:
         probe.close()
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Отчётов", counts[0])
     c2.metric("Таблиц", counts[1])
-    c3.metric("Строк с размерами", counts[2])
-    c4.metric("Строк со статистикой", counts[3])
+    c3.metric("С размерами", counts[2])
+    c4.metric("Со статистикой", counts[3])
+    c5.metric("Через view", counts[4])
+    c6.metric("Торговых сетей", counts[5])
     if run:
         st.caption(
             f"Последняя загрузка: {run[0]:%Y-%m-%d %H:%M} из `{run[1]}` — "
@@ -101,15 +190,18 @@ st.subheader("Шаг 2. Что чем является")
 col1, col2, col3 = st.columns(3)
 reports_file = col1.selectbox(
     "Отчёты (обязательно)", files,
-    help="Файл со строкой на отчёт: №, наименование, каталог, таблицы-источники.",
+    help="Строка на отчёт: №, ТС, завод, каталог тремя уровнями, наименование, "
+         "признак view, таблицы-источники, средняя длительность, число обращений.",
 )
 sizes_file = col2.selectbox(
-    "Размеры таблиц (если есть)", [NO_FILE] + files,
-    help="Строк, МБ данных и индексов по каждой таблице. Можно загрузить позже.",
+    "Размеры таблиц", [NO_FILE] + files,
+    help="Выгрузка сегментов БД: OWNER, SEGMENT_NAME, SEGMENT_TYPE, SIZE_MB, "
+         "PERCENT_OF_TOTAL. Строка на сегмент, а не на таблицу.",
 )
 usage_file = col3.selectbox(
-    "Частота использования (если есть)", [NO_FILE] + files,
-    help="Число запусков отчёта за период. Можно загрузить позже.",
+    "Статистика отдельным файлом", [NO_FILE] + files,
+    help="Обычно не нужен: обращения и длительность уже есть в основном файле. "
+         "Если выбран — его значения перекроют данные основного файла.",
 )
 
 mapping = load_mapping()
@@ -120,7 +212,7 @@ if len(sheets) > 1:
     mapping.reports.sheet = st.selectbox("Лист с отчётами", sheets)
     st.caption(f"В книге {len(sheets)} листов — выберите нужный.")
 
-# --- Шаг 3: предпросмотр сопоставления ------------------------------------
+# --- Шаг 3: проверка колонок всех выбранных файлов -------------------------
 
 st.subheader("Шаг 3. Проверка колонок")
 
@@ -131,16 +223,79 @@ except Exception as exc:  # noqa: BLE001 — показываем причину
     st.stop()
 
 resolved = resolve_columns(list(preview.columns), mapping.reports.columns)
-rows = [
-    {
-        "Поле модели": field,
-        "Колонка в файле": column or "— не найдена —",
-        "Статус": "✅" if column else ("❌ обязательна" if field == "report_name" else "—"),
-    }
-    for field, column in resolved.items()
-]
-st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+tab_names = ["Отчёты"]
+if sizes_file != NO_FILE:
+    tab_names.append("Размеры таблиц")
+if usage_file != NO_FILE:
+    tab_names.append("Статистика")
+tabs = st.tabs(tab_names)
+
+all_losses: list[str] = []
+
+with tabs[0]:
+    all_losses += show_mapping("Файл отчётов", resolved, REPORT_FIELDS)
+    with st.expander(f"Первые строки файла (всего {len(preview)})"):
+        st.dataframe(preview.head(10), use_container_width=True, hide_index=True)
+
+index = 1
+if sizes_file != NO_FILE:
+    with tabs[index]:
+        try:
+            sizes_preview = read_sheet(RAW_DIR / sizes_file, mapping.table_sizes)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Не удалось прочитать файл размеров:\n\n```\n{exc}\n```")
+            st.stop()
+        sizes_resolved = resolve_columns(
+            list(sizes_preview.columns), mapping.table_sizes.columns
+        )
+        all_losses += show_mapping("Файл размеров", sizes_resolved, SIZE_FIELDS)
+
+        if not sizes_resolved.get("total_mb"):
+            st.error(
+                "Не найдена колонка с размером (`SIZE_MB`) — файл бесполезен без неё. "
+                "Либо уберите его из выбора, либо добавьте заголовок в "
+                "`config/mapping.yml`, раздел `table_sizes.columns.total_mb`."
+            )
+            st.stop()
+        if not sizes_resolved.get("segment_type"):
+            st.warning(
+                "Колонка `SEGMENT_TYPE` не найдена: будут просуммированы **все** "
+                "строки файла, включая индексные и LOB-сегменты. Размеры таблиц "
+                "окажутся завышены."
+            )
+        else:
+            allowed = ", ".join(mapping.table_sizes.segment_types)
+            st.caption(f"В размер таблицы войдут только сегменты типов: {allowed}.")
+        with st.expander(f"Первые строки файла (всего {len(sizes_preview)})"):
+            st.dataframe(sizes_preview.head(10), use_container_width=True, hide_index=True)
+    index += 1
+
+if usage_file != NO_FILE:
+    with tabs[index]:
+        try:
+            usage_preview = read_sheet(RAW_DIR / usage_file, mapping.report_usage)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Не удалось прочитать файл статистики:\n\n```\n{exc}\n```")
+            st.stop()
+        usage_resolved = resolve_columns(
+            list(usage_preview.columns), mapping.report_usage.columns
+        )
+        show_mapping("Файл статистики", usage_resolved, USAGE_FIELDS)
+        if not usage_resolved.get("report_name"):
+            st.error(
+                "В файле статистики нет колонки с наименованием отчёта — "
+                "сопоставить строки не с чем. Уберите файл из выбора."
+            )
+            st.stop()
+        st.info(
+            "Значения из этого файла **перекроют** обращения и длительность из "
+            "основного файла: он считается более свежим источником."
+        )
+        with st.expander(f"Первые строки файла (всего {len(usage_preview)})"):
+            st.dataframe(usage_preview.head(10), use_container_width=True, hide_index=True)
+
+# Блокирующая проверка — только имя отчёта.
 if not resolved.get("report_name"):
     st.error(
         "Не найдена колонка с наименованием отчёта — загрузка невозможна.\n\n"
@@ -150,14 +305,16 @@ if not resolved.get("report_name"):
     )
     st.stop()
 
-if not resolved.get("source_tables"):
-    st.warning(
-        "Колонка со списком таблиц-источников не найдена. Отчёты загрузятся, "
-        "но анализ объёма данных работать не будет."
-    )
-
-with st.expander(f"Первые строки файла ({len(preview)} всего)"):
-    st.dataframe(preview.head(10), use_container_width=True, hide_index=True)
+if all_losses:
+    with st.expander(f"Что будет недоступно из-за ненайденных колонок ({len(all_losses)})"):
+        for line in all_losses:
+            st.markdown(f"- {line}")
+        st.caption(
+            "Загрузке это не мешает. Чтобы подхватить колонку, допишите её "
+            "заголовок в `config/mapping.yml` и обновите страницу."
+        )
+else:
+    st.success("Все ожидаемые колонки найдены — аналитика будет полной.")
 
 # --- Шаг 4: загрузка -------------------------------------------------------
 
@@ -186,11 +343,12 @@ if st.button("Загрузить", type="primary", use_container_width=True):
 
     st.success(f"Готово: загружено отчётов — {stats.rows_loaded}.")
 
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Прочитано строк", stats.rows_read)
     m2.metric("Отчётов загружено", stats.rows_loaded)
     m3.metric("Уникальных таблиц", stats.tables)
     m4.metric("Связей", stats.links)
+    m5.metric("Размеров таблиц", stats.sizes_loaded)
 
     if stats.rows_rejected:
         st.warning(f"Отброшено строк: {stats.rows_rejected} — см. ниже.")
@@ -198,6 +356,12 @@ if st.button("Загрузить", type="primary", use_container_width=True):
         st.warning(
             f"Ссылок на таблицы без схемы: {stats.unparsed_refs}. "
             "Схема таких таблиц записана как «(unknown)»."
+        )
+    if stats.segments_skipped:
+        st.info(
+            f"Пропущено {stats.segments_skipped} сегментов не-табличных типов "
+            "(индексы, LOB). Так и задумано: привязать их к таблице по выгрузке "
+            "нельзя, поэтому в объём таблиц они не входят."
         )
     if stats.sizes_unmatched:
         st.warning(
@@ -211,16 +375,29 @@ if st.button("Загрузить", type="primary", use_container_width=True):
             f"с каталогом. Например: {', '.join(stats.usage_unmatched[:5])}"
         )
 
-    import duckdb
-
     con = duckdb.connect(str(DB_PATH), read_only=True)
     try:
         rejects = con.execute(
             "SELECT source_row, reason, payload FROM etl_reject"
         ).df()
         rejects.columns = ["Строка файла", "Причина", "Данные строки"]
+        filled = con.execute(
+            """
+            SELECT COUNT(*) FILTER (WHERE network IS NOT NULL),
+                   COUNT(*) FILTER (WHERE uses_view IS NOT NULL),
+                   COUNT(*) FILTER (WHERE folder_l2 IS NOT NULL),
+                   (SELECT COUNT(*) FROM fact_report_usage WHERE avg_duration_sec IS NOT NULL)
+            FROM dim_report
+            """
+        ).fetchone()
     finally:
         con.close()
+
+    st.caption(
+        f"Заполнено: ТС — {filled[0]}, признак view — {filled[1]}, "
+        f"второй уровень каталога — {filled[2]}, длительность — {filled[3]}."
+    )
+
     if not rejects.empty:
         with st.expander(f"Отброшенные строки ({len(rejects)})"):
             st.dataframe(rejects, use_container_width=True, hide_index=True)

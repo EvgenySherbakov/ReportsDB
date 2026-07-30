@@ -40,6 +40,14 @@ QUERIES = {
         FROM v_decommission_candidates
         LIMIT 200
     """,
+    "durations": """
+        SELECT report_no, report_name, COALESCE(network, '—') AS network,
+               COALESCE(plant, '—') AS plant, catalog_path, uses_view,
+               exec_count, avg_duration_sec, total_duration_sec, duration_band
+        FROM v_report_duration
+        WHERE avg_duration_sec IS NOT NULL
+        LIMIT 500
+    """,
     "catalog": "SELECT * FROM v_catalog_overview",
     "networks": "SELECT * FROM v_network_overview",
 }
@@ -53,6 +61,8 @@ SELECT
     (SELECT ROUND(SUM(total_mb), 1) FROM fact_table_size)      AS total_mb,
     (SELECT ROUND(AVG(size_coverage_pct), 0) FROM v_report_footprint) AS coverage,
     (SELECT ROUND(SUM(exclusive_pct_of_db), 2) FROM v_report_footprint) AS pct_of_db,
+    (SELECT COUNT(*) FROM dim_report WHERE uses_view)                 AS with_view,
+    (SELECT ROUND(SUM(total_duration_sec) / 3600.0, 1) FROM v_report_cost_value) AS hours,
     (SELECT source_file FROM etl_run ORDER BY run_id DESC LIMIT 1)    AS source_file
 """
 

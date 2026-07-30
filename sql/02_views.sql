@@ -32,6 +32,8 @@ SELECT
     r.plant,
     r.catalog_path,
     r.folder_l1,
+    r.folder_l2,
+    r.folder_l3,
     r.uses_view,
     COUNT(j.table_id)                                                  AS table_count,
     COUNT(*) FILTER (WHERE j.has_size)                                 AS sized_table_count,
@@ -51,7 +53,7 @@ SELECT
 FROM dim_report r
 LEFT JOIN joined j ON j.report_id = r.report_id
 GROUP BY r.report_id, r.report_no, r.report_name, r.network, r.plant,
-         r.catalog_path, r.folder_l1, r.uses_view;
+         r.catalog_path, r.folder_l1, r.folder_l2, r.folder_l3, r.uses_view;
 
 -- 5.2. Критичность таблиц -------------------------------------------------
 CREATE VIEW v_table_criticality AS
@@ -64,14 +66,16 @@ SELECT
     COUNT(DISTINCT b.report_id)                    AS report_count,
     (COUNT(DISTINCT b.report_id) = 0)              AS is_orphan,
     s.total_mb,
+    s.percent_of_total,
+    s.segment_count,
     s.row_count,
     string_agg(DISTINCT r.report_name, '; ')       AS reports
 FROM dim_table t
 LEFT JOIN bridge_report_table b ON b.table_id = t.table_id
 LEFT JOIN dim_report r          ON r.report_id = b.report_id
 LEFT JOIN fact_table_size s     ON s.table_id = t.table_id
-GROUP BY t.table_id, t.full_name, t.schema_name, t.table_name,
-         t.is_parsed_ok, s.total_mb, s.row_count;
+GROUP BY t.table_id, t.full_name, t.schema_name, t.table_name, t.is_parsed_ok,
+         s.total_mb, s.percent_of_total, s.segment_count, s.row_count;
 
 -- 5.3. Стоимость против ценности -----------------------------------------
 CREATE VIEW v_report_cost_value AS
@@ -96,6 +100,8 @@ SELECT
     j.report_name,
     j.catalog_path,
     j.folder_l1,
+    j.folder_l2,
+    j.folder_l3,
     j.network,
     j.plant,
     j.uses_view,
@@ -172,13 +178,19 @@ ORDER BY report_count DESC;
 -- 5.5.1. Обзор каталога и схем --------------------------------------------
 CREATE VIEW v_catalog_overview AS
 SELECT
-    COALESCE(f.folder_l1, '(корень)')  AS folder,
-    COUNT(*)                           AS report_count,
-    SUM(f.table_count)                 AS table_links,
-    ROUND(SUM(f.exclusive_mb), 2)      AS exclusive_mb,
-    ROUND(AVG(f.size_coverage_pct), 1) AS avg_size_coverage_pct
-FROM v_report_footprint f
-GROUP BY 1
+    COALESCE(c.folder_l1, '(не указан)') AS folder_l1,
+    COALESCE(c.folder_l2, '')            AS folder_l2,
+    COALESCE(c.folder_l3, '')            AS folder_l3,
+    COUNT(*)                             AS report_count,
+    COUNT(*) FILTER (WHERE c.uses_view)  AS reports_with_view,
+    SUM(c.table_count)                   AS table_links,
+    ROUND(SUM(c.exclusive_mb), 2)        AS exclusive_mb,
+    ROUND(SUM(c.exclusive_pct_of_db), 3) AS exclusive_pct_of_db,
+    SUM(c.exec_count)                    AS exec_count,
+    ROUND(SUM(c.total_duration_sec), 1)  AS total_duration_sec,
+    ROUND(AVG(c.size_coverage_pct), 1)   AS avg_size_coverage_pct
+FROM v_report_cost_value c
+GROUP BY 1, 2, 3
 ORDER BY report_count DESC;
 
 CREATE VIEW v_schema_overview AS
@@ -188,10 +200,38 @@ SELECT
     COUNT(*) FILTER (WHERE t.report_count = 0)        AS orphan_table_count,
     SUM(t.report_count)                               AS report_links,
     ROUND(SUM(t.total_mb), 2)                         AS total_mb,
+    ROUND(SUM(t.percent_of_total), 3)                 AS percent_of_db,
     SUM(t.row_count)                                  AS total_rows
 FROM v_table_criticality t
 GROUP BY t.schema_name
 ORDER BY total_mb DESC NULLS LAST;
+
+-- 5.5.2. Время выполнения ------------------------------------------------
+-- Вторая, независимая от объёма метрика стоимости: отчёт бывает лёгким по
+-- данным и дорогим по суммарному времени, и наоборот.
+CREATE VIEW v_report_duration AS
+SELECT
+    report_id,
+    report_no,
+    report_name,
+    network,
+    plant,
+    catalog_path,
+    uses_view,
+    table_count,
+    exec_count,
+    avg_duration_sec,
+    total_duration_sec,
+    exclusive_mb,
+    CASE
+        WHEN avg_duration_sec IS NULL           THEN 'Нет данных'
+        WHEN avg_duration_sec >= 60             THEN 'Минута и дольше'
+        WHEN avg_duration_sec >= 10             THEN 'От 10 секунд'
+        WHEN avg_duration_sec >= 1              THEN 'От 1 секунды'
+        ELSE                                         'Меньше секунды'
+    END AS duration_band
+FROM v_report_cost_value
+ORDER BY total_duration_sec DESC NULLS LAST;
 
 -- 5.6. Пересечение отчётов по набору источников ---------------------------
 CREATE VIEW v_report_overlap AS

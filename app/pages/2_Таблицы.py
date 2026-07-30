@@ -33,6 +33,12 @@ k3.metric(
     "Суммарный объём, МБ",
     f"{view['total_mb'].sum():,.0f}".replace(",", " ") if view["total_mb"].notna().any() else "—",
 )
+if view["segment_count"].fillna(0).gt(1).any():
+    st.caption(
+        f"У {int(view['segment_count'].fillna(0).gt(1).sum())} таблиц размер "
+        "сложен из нескольких сегментов (секции). Индексные и LOB-сегменты в "
+        "объём таблицы не входят."
+    )
 
 st.subheader("Топ-20 самых востребованных таблиц")
 top = view.nlargest(20, "report_count")
@@ -53,12 +59,16 @@ if not top.empty:
 st.subheader("Таблицы")
 shown = show_table(
     view.sort_values(["report_count", "total_mb"], ascending=False)[
-        ["full_name", "schema_name", "report_count", "total_mb", "row_count",
-         "is_orphan", "is_parsed_ok", "reports"]
+        ["full_name", "schema_name", "report_count", "total_mb", "percent_of_total",
+         "segment_count", "row_count", "is_orphan", "is_parsed_ok", "reports"]
     ],
     {
         "reports": st.column_config.TextColumn("Зависимые отчёты", width="large"),
         "total_mb": st.column_config.NumberColumn("Объём, МБ", format="%.1f"),
+        "percent_of_total": st.column_config.NumberColumn("Доля БД, %", format="%.3f"),
+        "segment_count": st.column_config.NumberColumn(
+            "Сегментов", help="Сколько строк выгрузки сложилось в размер таблицы: "
+                              "у секционированных таблиц больше одной."),
         "is_orphan": st.column_config.CheckboxColumn("Сирота"),
         "is_parsed_ok": st.column_config.CheckboxColumn("Схема распознана"),
     },

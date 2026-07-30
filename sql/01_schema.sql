@@ -2,6 +2,7 @@
 -- Скрипт выполняется на чистой БД (ETL пересоздаёт файл), но написан идемпотентно.
 
 DROP VIEW IF EXISTS v_report_overlap;
+DROP VIEW IF EXISTS v_report_duration;
 DROP VIEW IF EXISTS v_network_overview;
 DROP VIEW IF EXISTS v_schema_overview;
 DROP VIEW IF EXISTS v_catalog_overview;

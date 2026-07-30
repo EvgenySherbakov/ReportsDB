@@ -120,6 +120,7 @@
   .legend .s1 { background: var(--series-1); }
   .legend .s2 { background: var(--series-2); }
   .empty { color: var(--text-muted); font-size: .87rem; padding: .5rem 0; }
+  .hint { color: var(--text-secondary); font-size: .85rem; margin: -.4rem 0 .9rem; }
   footer { color: var(--text-muted); font-size: .8rem; padding-top: .5rem; }
 </style>
 </head>
@@ -170,6 +171,18 @@
 </section>
 
 <section>
+  <h2>Время выполнения</h2>
+  <p class="hint">Вторая, независимая от объёма метрика стоимости: суммарное
+  время — это число обращений, умноженное на среднюю длительность выборки.</p>
+  <div class="controls">
+    <input type="search" id="q-durations" placeholder="Поиск…">
+    <select id="f-band"></select>
+    <button class="csv" data-csv="durations">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-durations"></table></div>
+</section>
+
+<section>
   <h2>Таблицы-источники</h2>
   <div class="controls">
     <input type="search" id="q-tables" placeholder="Поиск по имени таблицы…">
@@ -206,6 +219,8 @@ const kpis = [
   ['Таблиц без отчётов', fmt(k.orphans)],
   ['Объём таблиц, МБ', fmt(k.total_mb, 1)],
   ['Доля БД под отчётами', k.pct_of_db === null ? '—' : fmt(k.pct_of_db, 1) + '%'],
+  ['Через view', fmt(k.with_view)],
+  ['Время на отчёты, ч', fmt(k.hours, 1)],
   ['Покрытие размерами', k.coverage === null ? '—' : fmt(k.coverage) + '%'],
 ];
 document.getElementById('kpis').innerHTML = kpis
@@ -333,6 +348,17 @@ const CANDIDATE_COLS = [
   {key: 'exec_count', label: 'Запусков', num: true},
   {key: 'confidence', label: 'Уверенность'},
 ];
+const DURATION_COLS = [
+  {key: 'report_no', label: '№'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'uses_view', label: 'Через view', bool: true},
+  {key: 'exec_count', label: 'Запусков', num: true},
+  {key: 'avg_duration_sec', label: 'Ср. длит., с', num: true, dec: 1},
+  {key: 'total_duration_sec', label: 'Всего времени, с', num: true, sort: true},
+  {key: 'duration_band', label: 'Длительность выборки'},
+];
 const TABLE_COLS = [
   {key: 'full_name', label: 'Таблица', wide: true},
   {key: 'schema_name', label: 'Схема'},
@@ -355,6 +381,12 @@ const getters = {
     filter: document.getElementById('f-confidence'),
     filterField: 'confidence', filterLabel: 'Любая уверенность',
   }),
+  durations: makeTable({
+    el: 't-durations', rows: DATA.durations, cols: DURATION_COLS,
+    search: document.getElementById('q-durations'),
+    filter: document.getElementById('f-band'),
+    filterField: 'duration_band', filterLabel: 'Любая длительность',
+  }),
   tables: makeTable({
     el: 't-tables', rows: DATA.tables, cols: TABLE_COLS,
     search: document.getElementById('q-tables'),
@@ -363,7 +395,8 @@ const getters = {
   }),
 };
 
-const COLS = {reports: REPORT_COLS, candidates: CANDIDATE_COLS, tables: TABLE_COLS};
+const COLS = {reports: REPORT_COLS, candidates: CANDIDATE_COLS,
+              durations: DURATION_COLS, tables: TABLE_COLS};
 
 /* --- Выгрузка текущей выборки в CSV ------------------------------------- */
 document.querySelectorAll('button.csv').forEach(btn => {

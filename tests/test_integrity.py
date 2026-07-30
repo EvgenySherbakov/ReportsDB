@@ -38,7 +38,18 @@ VIEWS = [
     "v_catalog_overview",
     "v_schema_overview",
     "v_network_overview",
+    "v_report_duration",
     "v_report_overlap",
+]
+
+# Каждое поле, приходящее из исходных файлов, обязано быть видно в аналитике —
+# иначе колонку загрузили впустую. Проверяется тестом ниже.
+FIELDS_IN_ANALYTICS = [
+    "report_no", "report_name", "network", "plant",
+    "folder_l1", "folder_l2", "folder_l3", "uses_view",
+    "exec_count", "avg_duration_sec", "total_duration_sec",
+    "percent_of_total", "exclusive_pct_of_db", "segment_count",
+    "total_mb", "schema_name", "table_name",
 ]
 
 
@@ -350,6 +361,51 @@ def test_report_without_sources_is_loaded(full_db):
     assert found is not None and found[0] == 0
 
 
+def test_every_loaded_field_is_visible_in_analytics(full_db):
+    """Ни одно загруженное поле не должно остаться только в таблицах модели."""
+    views = [
+        row[0] for row in full_db.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'main' AND table_type = 'VIEW'"
+        ).fetchall()
+    ]
+    exposed: set[str] = set()
+    for view in views:
+        exposed |= {row[0] for row in full_db.execute(f"DESCRIBE {view}").fetchall()}
+
+    missing = [f for f in FIELDS_IN_ANALYTICS if f not in exposed]
+    assert not missing, f"поля загружены, но не попали ни в одну витрину: {missing}"
+
+
+def test_catalog_overview_keeps_all_three_levels(full_db):
+    columns = {row[0] for row in full_db.execute("DESCRIBE v_catalog_overview").fetchall()}
+    assert {"folder_l1", "folder_l2", "folder_l3"} <= columns
+    deep = full_db.execute(
+        "SELECT COUNT(*) FROM v_catalog_overview WHERE folder_l3 <> ''"
+    ).fetchone()[0]
+    assert deep > 0, "третий уровень каталога должен доходить до сводки"
+
+
+def test_duration_bands_cover_all_reports_with_data(full_db):
+    """У каждого отчёта с длительностью есть непустая категория."""
+    bad = full_db.execute(
+        "SELECT COUNT(*) FROM v_report_duration "
+        "WHERE avg_duration_sec IS NOT NULL AND duration_band = 'Нет данных'"
+    ).fetchone()[0]
+    assert bad == 0
+
+
+def test_total_duration_is_execs_times_average(full_db):
+    mismatch = full_db.execute(
+        """
+        SELECT COUNT(*) FROM v_report_duration
+        WHERE exec_count IS NOT NULL AND avg_duration_sec IS NOT NULL
+          AND ABS(total_duration_sec - exec_count * avg_duration_sec) > 0.2
+        """
+    ).fetchone()[0]
+    assert mismatch == 0
+
+
 # --- Витрины на пустых фактах --------------------------------------------
 
 @pytest.mark.parametrize("view", VIEWS)
@@ -399,6 +455,9 @@ def test_html_export_is_self_contained(full_db, tmp_path, paths):
     html = out.read_text(encoding="utf-8")
 
     assert "/*__DATA__*/null" not in html, "данные не подставились в шаблон"
+    # Организационный разрез и время должны доехать до автономного файла.
+    for key in ("network", "plant", "uses_view", "durations", "duration_band"):
+        assert key in html, f"в HTML не попало поле {key}"
     external = re.findall(r"""(?:src|href)\s*=\s*["']https?://""", html)
     assert not external, f"HTML тянет внешние ресурсы: {external}"
     assert "Отчётность SSRS" in html
