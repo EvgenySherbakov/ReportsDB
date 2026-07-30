@@ -40,16 +40,35 @@ def surface_color() -> str:
     return "#0e1117" if st.get_option("theme.base") == "dark" else "#ffffff"
 
 
+# Открытые соединения. Нужны, чтобы закрыть их перед пересборкой БД: под
+# Windows занятый файл нельзя ни переименовать, ни перезаписать.
+_OPEN_CONNECTIONS: list[duckdb.DuckDBPyConnection] = []
+
+
 @st.cache_resource
 def connect() -> duckdb.DuckDBPyConnection:
     if not DB_PATH.exists():
         st.error(
             f"База не найдена: `{DB_PATH}`\n\n"
-            "Соберите её командой `python -m reportsdb build data/raw/<файл>.xlsx` "
-            "или `python -m reportsdb sample` для синтетических данных."
+            "Загрузите данные на странице **Загрузка данных** или соберите базу "
+            "командой `python -m reportsdb build data/raw/<файл>.xlsx`."
         )
         st.stop()
-    return duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    _OPEN_CONNECTIONS.append(con)
+    return con
+
+
+def release_db() -> None:
+    """Отпускает файл БД и сбрасывает кэши — вызывать перед пересборкой."""
+    for con in _OPEN_CONNECTIONS:
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001 — соединение уже закрыто, это не ошибка
+            pass
+    _OPEN_CONNECTIONS.clear()
+    st.cache_resource.clear()
+    st.cache_data.clear()
 
 
 @st.cache_data(show_spinner=False)

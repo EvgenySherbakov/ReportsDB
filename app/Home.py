@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from _shared import ACCENT, download, missing_facts_notice, page_setup, query
+from _shared import (
+    ACCENT,
+    download,
+    missing_facts_notice,
+    page_setup,
+    query,
+    show_table,
+)
 
 page_setup("Обзор отчётности SSRS", "🗂️")
 missing_facts_notice()
@@ -22,18 +30,30 @@ kpi = query(
     """
 ).iloc[0]
 
+
+def num(value, suffix: str = "", decimals: int = 0) -> str:
+    """Число для KPI. Пустое значение — прочерк, а не «nan».
+
+    В строке есть NULL-колонки, поэтому pandas приводит весь ряд к float:
+    счётчики нужно возвращать к целым явно.
+    """
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{value:,.{decimals}f}".replace(",", " ") + suffix
+
+
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Отчётов", f"{kpi.reports:,}".replace(",", " "))
-c2.metric("Таблиц-источников", f"{kpi.tables:,}".replace(",", " "))
-c3.metric("Связей", f"{kpi.links:,}".replace(",", " "))
+c1.metric("Отчётов", num(kpi.reports))
+c2.metric("Таблиц-источников", num(kpi.tables))
+c3.metric("Связей", num(kpi.links))
 c4.metric(
     "Объём таблиц, МБ",
-    "—" if kpi.total_mb is None else f"{kpi.total_mb:,.0f}".replace(",", " "),
+    num(kpi.total_mb),
     help="Суммарный размер уникальных таблиц — без двойного учёта общих.",
 )
 c5.metric(
     "Покрытие размерами",
-    "—" if kpi.coverage is None else f"{kpi.coverage:.0f}%",
+    num(kpi.coverage, "%"),
     help="Средняя доля таблиц отчёта, для которых известен размер.",
 )
 
@@ -55,8 +75,14 @@ with left:
         )
         fig.update_layout(height=max(260, 34 * len(catalog)), margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(catalog, use_container_width=True, hide_index=True)
-    download(catalog, "catalog_overview.csv")
+    shown = show_table(catalog, {
+        "folder": "Папка",
+        "report_count": "Отчётов",
+        "table_links": "Связей с таблицами",
+        "exclusive_mb": st.column_config.NumberColumn("Освободится, МБ", format="%.1f"),
+        "avg_size_coverage_pct": st.column_config.NumberColumn("Покрытие размерами, %", format="%.0f"),
+    })
+    download(shown, "catalog_overview.csv")
 
 with right:
     st.subheader("Схемы БД")
@@ -73,7 +99,12 @@ with right:
         )
         fig.update_layout(height=max(260, 34 * len(sized)), margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(schemas, use_container_width=True, hide_index=True)
+    show_table(schemas, {
+        "orphan_table_count": "Таблиц без отчётов",
+        "report_links": "Связей с отчётами",
+        "total_mb": st.column_config.NumberColumn("Объём, МБ", format="%.1f"),
+        "total_rows": "Строк",
+    })
 
 st.divider()
 st.subheader("Качество исходных данных")
@@ -83,14 +114,16 @@ with q1:
     rejects = query("SELECT source_row, reason, payload FROM etl_reject")
     st.caption(f"Отброшено строк при загрузке: **{len(rejects)}**")
     if not rejects.empty:
-        st.dataframe(rejects, use_container_width=True, hide_index=True, height=200)
+        show_table(rejects, {
+            "source_row": "Строка файла", "reason": "Причина", "payload": "Данные строки",
+        }, height=200)
 with q2:
     unparsed = query(
         "SELECT full_name, table_name FROM dim_table WHERE NOT is_parsed_ok ORDER BY 1"
     )
     st.caption(f"Ссылок на таблицы без схемы: **{len(unparsed)}**")
     if not unparsed.empty:
-        st.dataframe(unparsed, use_container_width=True, hide_index=True, height=200)
+        show_table(unparsed, {"full_name": "Таблица", "table_name": "Имя таблицы"}, height=200)
 
 run = query("SELECT * FROM etl_run ORDER BY run_id DESC LIMIT 1")
 if not run.empty:
