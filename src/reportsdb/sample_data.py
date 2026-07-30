@@ -85,16 +85,20 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
 
         rows.append(
             {
-                "Report Name": name,
-                "Path": rnd.choice(FOLDERS),
-                "Source Tables": "; ".join(picked),
+                "№": i + 1,
+                "Наименование отчета": name,
+                "Каталог": rnd.choice(FOLDERS),
+                "Таблицы источники данных": ";".join(picked),
                 "Owner": rnd.choice(["a.ivanov", "s.petrova", "d.kuznetsov", ""]),
             }
         )
 
     # Пара проблемных строк — проверка отбраковки.
-    rows.append({"Report Name": "", "Path": "/Finance", "Source Tables": "dbo.Orders", "Owner": ""})
-    rows.append({"Report Name": "Report Without Sources", "Path": "/HR", "Source Tables": "", "Owner": ""})
+    n = len(rows)
+    rows.append({"№": n + 1, "Наименование отчета": "", "Каталог": "/Finance",
+                 "Таблицы источники данных": "dbo.Orders", "Owner": ""})
+    rows.append({"№": n + 2, "Наименование отчета": "Report Without Sources",
+                 "Каталог": "/HR", "Таблицы источники данных": "", "Owner": ""})
 
     reports_path = RAW_DIR / "sample_reports.xlsx"
     pd.DataFrame(rows).to_excel(reports_path, index=False)
@@ -119,15 +123,15 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
 
     usage = []
     for row in rows:
-        if not row["Report Name"]:
+        if not row["Наименование отчета"]:
             continue
         if rnd.random() < 0.15:  # часть отчётов вовсе без статистики
             continue
         execs = 0 if rnd.random() < 0.25 else int(rnd.lognormvariate(3.2, 1.5))
         usage.append(
             {
-                "Report Name": row["Report Name"],
-                "Path": row["Path"],
+                "Report Name": row["Наименование отчета"],
+                "Path": row["Каталог"],
                 "Executions": execs,
                 "Users": max(0, min(execs, int(execs * rnd.uniform(0.1, 0.5)))),
                 "Avg Duration Ms": round(rnd.lognormvariate(7.5, 1.0), 0),

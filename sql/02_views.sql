@@ -25,6 +25,7 @@ joined AS (
 )
 SELECT
     r.report_id,
+    r.report_no,
     r.report_name,
     r.catalog_path,
     r.folder_l1,
@@ -43,7 +44,7 @@ SELECT
     END                                                                AS size_coverage_pct
 FROM dim_report r
 LEFT JOIN joined j ON j.report_id = r.report_id
-GROUP BY r.report_id, r.report_name, r.catalog_path, r.folder_l1;
+GROUP BY r.report_id, r.report_no, r.report_name, r.catalog_path, r.folder_l1;
 
 -- 5.2. Критичность таблиц -------------------------------------------------
 CREATE VIEW v_table_criticality AS
@@ -84,6 +85,7 @@ th AS (
 )
 SELECT
     j.report_id,
+    j.report_no,
     j.report_name,
     j.catalog_path,
     j.folder_l1,
@@ -112,6 +114,7 @@ FROM j CROSS JOIN th;
 CREATE VIEW v_decommission_candidates AS
 SELECT
     report_id,
+    report_no,
     report_name,
     catalog_path,
     table_count,

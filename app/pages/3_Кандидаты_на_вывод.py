@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from _shared import download, missing_facts_notice, page_setup, query
+from _shared import download, missing_facts_notice, page_setup, query, show_table
 
 page_setup("Кандидаты на вывод из эксплуатации", "🧹")
 missing_facts_notice()
@@ -32,19 +32,17 @@ k3.metric(
     int((view["confidence"] == "Высокая").sum()),
 )
 
-st.dataframe(
+shown = show_table(
     view,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
+    {
         "exclusive_mb": st.column_config.NumberColumn("Освободится, МБ", format="%.1f"),
-        "gross_mb": st.column_config.NumberColumn("gross_mb, МБ ⚠", format="%.1f"),
+        "gross_mb": st.column_config.NumberColumn("Всего, МБ ⚠", format="%.1f"),
         "size_coverage_pct": st.column_config.ProgressColumn(
             "Покрытие размерами", min_value=0, max_value=100, format="%.0f%%"
         ),
     },
 )
-download(view, "decommission_candidates.csv")
+download(shown, "decommission_candidates.csv")
 
 st.warning(
     "Перед выводом отчёта проверьте его вручную. Список источников взят из "

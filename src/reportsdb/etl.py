@@ -150,6 +150,7 @@ def _load_reports(
             reports.append(
                 (
                     report_id,
+                    clean_text(_cell(row, cols.get("report_no"))),
                     name,
                     path,
                     l1,
@@ -177,8 +178,9 @@ def _load_reports(
         con,
         "dim_report",
         reports,
-        ["report_id", "report_name", "catalog_path", "folder_l1", "folder_l2",
-         "folder_l3", "folder_depth", "description", "owner", "source_row"],
+        ["report_id", "report_no", "report_name", "catalog_path", "folder_l1",
+         "folder_l2", "folder_l3", "folder_depth", "description", "owner",
+         "source_row"],
     )
     _insert(
         con,

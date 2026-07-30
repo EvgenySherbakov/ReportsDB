@@ -5,7 +5,7 @@ from __future__ import annotations
 import plotly.express as px
 import streamlit as st
 
-from _shared import ACCENT, download, page_setup, query
+from _shared import ACCENT, download, page_setup, query, show_table
 
 page_setup("Таблицы-источники", "🗃️")
 
@@ -51,21 +51,19 @@ if not top.empty:
     st.caption("Изменение схемы этих таблиц затронет наибольшее число отчётов.")
 
 st.subheader("Таблицы")
-st.dataframe(
+shown = show_table(
     view.sort_values(["report_count", "total_mb"], ascending=False)[
         ["full_name", "schema_name", "report_count", "total_mb", "row_count",
          "is_orphan", "is_parsed_ok", "reports"]
     ],
-    use_container_width=True,
-    hide_index=True,
-    column_config={
+    {
         "reports": st.column_config.TextColumn("Зависимые отчёты", width="large"),
         "total_mb": st.column_config.NumberColumn("Объём, МБ", format="%.1f"),
         "is_orphan": st.column_config.CheckboxColumn("Сирота"),
         "is_parsed_ok": st.column_config.CheckboxColumn("Схема распознана"),
     },
 )
-download(view, "table_criticality.csv")
+download(shown, "table_criticality.csv")
 
 st.divider()
 st.subheader("Отчёты с почти одинаковым набором источников")

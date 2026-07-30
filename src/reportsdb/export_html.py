@@ -18,7 +18,7 @@ TEMPLATE = Path(__file__).parent / "templates" / "standalone.html"
 
 QUERIES = {
     "reports": """
-        SELECT f.report_id, f.report_name, f.catalog_path,
+        SELECT f.report_id, f.report_no, f.report_name, f.catalog_path,
                COALESCE(f.folder_l1, '(корень)') AS folder,
                f.table_count, f.exclusive_mb, f.gross_mb, f.shared_mb,
                f.size_coverage_pct, c.exec_count, c.quadrant
@@ -32,7 +32,7 @@ QUERIES = {
         ORDER BY report_count DESC, total_mb DESC NULLS LAST
     """,
     "candidates": """
-        SELECT report_name, catalog_path, exclusive_mb, table_count,
+        SELECT report_no, report_name, catalog_path, exclusive_mb, table_count,
                exec_count, confidence
         FROM v_decommission_candidates
         LIMIT 200

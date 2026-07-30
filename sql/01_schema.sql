@@ -20,6 +20,9 @@ DROP TABLE IF EXISTS dim_report;
 -- Отчёты -----------------------------------------------------------------
 CREATE TABLE dim_report (
     report_id    INTEGER PRIMARY KEY,
+    -- Номер из исходной таблицы (колонка «№»): текстом, потому что встречаются
+    -- значения вида «1.2». Служит для поиска отчёта в оригинальном файле.
+    report_no    VARCHAR,
     report_name  VARCHAR NOT NULL,
     catalog_path VARCHAR,
     folder_l1    VARCHAR,

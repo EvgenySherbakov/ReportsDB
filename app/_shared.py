@@ -57,6 +57,56 @@ def query(sql: str, params: tuple = ()) -> pd.DataFrame:
     return connect().execute(sql, list(params)).df()
 
 
+# Русские подписи колонок — одни и те же на всех страницах.
+LABELS = {
+    "report_no": "№",
+    "report_name": "Отчёт",
+    "catalog_path": "Каталог",
+    "folder_l1": "Папка",
+    "table_count": "Таблиц",
+    "sized_table_count": "Из них с размером",
+    "exclusive_table_count": "Эксклюзивных таблиц",
+    "gross_rows": "Строк, всего",
+    "exclusive_rows": "Строк, эксклюзивно",
+    "exec_count": "Запусков",
+    "distinct_users": "Пользователей",
+    "avg_duration_ms": "Длительность, мс",
+    "last_executed_at": "Последний запуск",
+    "mb_per_execution": "МБ на запуск",
+    "quadrant": "Квадрант",
+    "confidence": "Уверенность",
+    "full_name": "Таблица",
+    "schema_name": "Схема",
+    "table_name": "Имя таблицы",
+    "report_count": "Отчётов",
+    "row_count": "Строк",
+    "total_mb": "Объём, МБ",
+    "is_orphan": "Сирота",
+    "is_parsed_ok": "Схема распознана",
+    "reports": "Зависимые отчёты",
+}
+
+# Технические ключи: в таблицах не показываем, в CSV они не нужны тоже.
+TECHNICAL = ["report_id", "table_id"]
+
+
+def show_table(df: pd.DataFrame, extra: dict | None = None, **kwargs) -> pd.DataFrame:
+    """Таблица с русскими подписями и без суррогатных ключей."""
+    view = df.drop(columns=[c for c in TECHNICAL if c in df.columns]).copy()
+    # Пустые текстовые ячейки Streamlit рисует как «None» — заменяем на прочерк.
+    # Числовые колонки не трогаем: строка сломала бы сортировку по значению.
+    for col in view.columns:
+        if view[col].dtype == "object":
+            view[col] = view[col].fillna("—")
+    config = {k: v for k, v in (extra or {}).items() if k in view.columns}
+    for col in view.columns:
+        if col not in config and col in LABELS:
+            config[col] = LABELS[col]
+    st.dataframe(view, use_container_width=True, hide_index=True,
+                 column_config=config, **kwargs)
+    return view
+
+
 def download(df: pd.DataFrame, filename: str, label: str = "Выгрузить CSV") -> None:
     st.download_button(
         label,

@@ -14,7 +14,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from reportsdb.config import Mapping, SectionConfig, load_mapping  # noqa: E402
+from reportsdb.config import (  # noqa: E402
+    Mapping,
+    SectionConfig,
+    load_mapping,
+    resolve_columns,
+)
 from reportsdb.etl import build  # noqa: E402
 from reportsdb.normalize import (  # noqa: E402
     normalise_catalog_path,
@@ -105,6 +110,34 @@ def test_parse_table_list_dedupes_case_insensitively():
 )
 def test_normalise_catalog_path(raw, expected):
     assert normalise_catalog_path(raw) == expected
+
+
+def test_real_headers_from_customer_file_resolve():
+    """Фактические заголовки из файла заказчика должны сопоставляться без правок.
+
+    «Наименование отчета» пишется без «ё» — сопоставление это учитывает.
+    """
+    headers = ["№", "Наименование отчета", "Каталог", "Таблицы источники данных"]
+    resolved = resolve_columns(headers, load_mapping().reports.columns)
+    assert resolved["report_no"] == "№"
+    assert resolved["report_name"] == "Наименование отчета"
+    assert resolved["catalog_path"] == "Каталог"
+    assert resolved["source_tables"] == "Таблицы источники данных"
+
+
+def test_report_no_is_loaded(full_db):
+    missing = full_db.execute(
+        "SELECT COUNT(*) FROM dim_report WHERE report_no IS NULL"
+    ).fetchone()[0]
+    assert missing == 0
+
+
+def test_raw_data_is_git_ignored():
+    """Данные заказчика не должны попадать в репозиторий ни при каком раскладе."""
+    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "data/raw/*" in ignore
+    assert "data/*.duckdb" in ignore
+    assert "dist/" in ignore
 
 
 # --- Целостность модели ---------------------------------------------------

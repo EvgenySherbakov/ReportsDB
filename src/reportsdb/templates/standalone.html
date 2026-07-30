@@ -303,6 +303,7 @@ function makeTable(opts) {
 }
 
 const REPORT_COLS = [
+  {key: 'report_no', label: '№'},
   {key: 'report_name', label: 'Отчёт', wide: true},
   {key: 'catalog_path', label: 'Каталог'},
   {key: 'table_count', label: 'Таблиц', num: true},
@@ -314,6 +315,7 @@ const REPORT_COLS = [
   {key: 'quadrant', label: 'Квадрант'},
 ];
 const CANDIDATE_COLS = [
+  {key: 'report_no', label: '№'},
   {key: 'report_name', label: 'Отчёт', wide: true},
   {key: 'catalog_path', label: 'Каталог'},
   {key: 'exclusive_mb', label: 'Освободится, МБ', num: true, dec: 1, sort: true},

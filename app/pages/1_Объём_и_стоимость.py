@@ -10,6 +10,7 @@ from _shared import (
     FOOTPRINT_HINT,
     MUTED,
     SECONDARY,
+    show_table,
     surface_color,
     download,
     missing_facts_notice,
@@ -123,17 +124,15 @@ else:
     st.caption("Диаграмма появится после загрузки данных о частоте использования.")
 
 st.subheader("Все отчёты выборки")
-st.dataframe(
+shown = show_table(
     view.sort_values("exclusive_mb", ascending=False),
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "exclusive_mb": st.column_config.NumberColumn("exclusive_mb, МБ", format="%.1f"),
-        "gross_mb": st.column_config.NumberColumn("gross_mb, МБ ⚠", format="%.1f"),
-        "shared_mb": st.column_config.NumberColumn("shared_mb, МБ", format="%.1f"),
+    {
+        "exclusive_mb": st.column_config.NumberColumn("Освободится, МБ", format="%.1f"),
+        "shared_mb": st.column_config.NumberColumn("Останется общим, МБ", format="%.1f"),
+        "gross_mb": st.column_config.NumberColumn("Всего, МБ ⚠", format="%.1f"),
         "size_coverage_pct": st.column_config.ProgressColumn(
             "Покрытие размерами", min_value=0, max_value=100, format="%.0f%%"
         ),
     },
 )
-download(view, "report_footprint.csv")
+download(shown, "report_footprint.csv")
