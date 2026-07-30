@@ -102,7 +102,10 @@ CREATE TABLE etl_run (
     rows_read    INTEGER,
     rows_loaded  INTEGER,
     rows_rejected INTEGER,
-    tool_version VARCHAR
+    tool_version VARCHAR,
+    -- Версия структуры БД. По ней приложение понимает, что база собрана
+    -- прежней версией кода и её нужно пересобрать.
+    schema_version INTEGER
 );
 
 -- Отбракованные строки ----------------------------------------------------

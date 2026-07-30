@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
+from reportsdb.config import SCHEMA_VERSION  # noqa: E402 — после правки sys.path
+
 DB_PATH = Path(os.environ.get("REPORTSDB_PATH", ROOT / "data" / "reports.duckdb"))
 
 # Палитра проверена скриптом validate_palette.js: цветность, различимость при
@@ -45,6 +47,17 @@ def surface_color() -> str:
 _OPEN_CONNECTIONS: list[duckdb.DuckDBPyConnection] = []
 
 
+def db_schema_version(con: duckdb.DuckDBPyConnection) -> int:
+    """Версия структуры базы. 0 — база собрана до появления версионирования."""
+    try:
+        row = con.execute(
+            "SELECT schema_version FROM etl_run ORDER BY run_id DESC LIMIT 1"
+        ).fetchone()
+    except Exception:  # noqa: BLE001 — нет колонки или самой таблицы
+        return 0
+    return int(row[0]) if row and row[0] is not None else 0
+
+
 @st.cache_resource
 def connect() -> duckdb.DuckDBPyConnection:
     if not DB_PATH.exists():
@@ -56,6 +69,20 @@ def connect() -> duckdb.DuckDBPyConnection:
         st.stop()
     con = duckdb.connect(str(DB_PATH), read_only=True)
     _OPEN_CONNECTIONS.append(con)
+
+    # База, собранная прежней версией кода, не содержит новых колонок витрин.
+    # Без этой проверки страницы падали бы с непонятной ошибкой SQL.
+    version = db_schema_version(con)
+    if version < SCHEMA_VERSION:
+        st.error(
+            f"База собрана прежней версией программы (структура {version} "
+            f"вместо {SCHEMA_VERSION}) — в ней нет новых полей.\n\n"
+            "**Что сделать:** откройте страницу **Загрузка данных** в меню слева, "
+            "выберите файлы и нажмите «Загрузить». Это займёт несколько секунд.\n\n"
+            "Данные при этом не потеряются: исходные файлы лежат в `data/raw/`, "
+            "а прежняя база сохранится рядом как `reports.duckdb.bak`."
+        )
+        st.stop()
     return con
 
 

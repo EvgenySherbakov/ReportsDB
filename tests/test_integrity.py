@@ -20,6 +20,7 @@ from reportsdb.config import (  # noqa: E402
     load_mapping,
     resolve_columns,
 )
+from reportsdb.config import SCHEMA_VERSION  # noqa: E402
 from reportsdb.etl import build  # noqa: E402
 from reportsdb.normalize import (  # noqa: E402
     join_folders,
@@ -288,6 +289,36 @@ def test_full_name_unique(full_db):
         "GROUP BY full_name HAVING COUNT(*) > 1)"
     ).fetchone()[0]
     assert dupes == 0
+
+
+def test_schema_version_is_written(full_db):
+    """Версия структуры пишется в журнал — по ней приложение узнаёт старую базу."""
+    version = full_db.execute(
+        "SELECT schema_version FROM etl_run ORDER BY run_id DESC LIMIT 1"
+    ).fetchone()[0]
+    assert version == SCHEMA_VERSION
+
+
+def test_schema_version_matches_view_set():
+    """Забыли поднять SCHEMA_VERSION после правки SQL — тест напомнит.
+
+    Сверяем со слепком: любое изменение схемы или витрин обязано
+    сопровождаться увеличением версии, иначе у пользователей останется
+    несовместимая база и падение вместо понятного сообщения.
+    """
+    import hashlib
+
+    digest = hashlib.sha256()
+    for name in ("01_schema.sql", "02_views.sql"):
+        digest.update((ROOT / "sql" / name).read_bytes())
+    # Слепок SQL на момент SCHEMA_VERSION = 3.
+    expected = "619127"  # первые 6 знаков; обновлять вместе с версией
+    actual = digest.hexdigest()[:6]
+    assert actual == expected, (
+        f"SQL изменился (слепок {actual}, ожидался {expected}). "
+        f"Поднимите SCHEMA_VERSION в src/reportsdb/config.py и обновите слепок "
+        f"в этом тесте."
+    )
 
 
 def test_every_source_row_accounted_for(full_db):

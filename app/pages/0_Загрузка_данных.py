@@ -16,9 +16,9 @@ import duckdb
 import pandas as pd
 import streamlit as st
 
-from _shared import DB_PATH, page_setup, release_db
+from _shared import DB_PATH, db_schema_version, page_setup, release_db
 
-from reportsdb.config import RAW_DIR, load_mapping, resolve_columns
+from reportsdb.config import RAW_DIR, SCHEMA_VERSION, load_mapping, resolve_columns
 from reportsdb.etl import build
 from reportsdb.excel import list_sheets, read_sheet
 
@@ -122,32 +122,49 @@ st.subheader("Текущее состояние")
 if not DB_PATH.exists():
     st.info("База ещё не собрана. Загрузите файл с отчётами — это займёт секунды.")
 else:
+    # Эта страница — путь восстановления, поэтому она обязана открываться на
+    # ЛЮБОЙ базе, включая собранную прежней версией. Отсюда мягкие запросы:
+    # ни один сбой чтения не должен помешать нажать «Загрузить».
+    run = counts = None
+    version = 0
     probe = duckdb.connect(str(DB_PATH), read_only=True)
     try:
-        run = probe.execute(
-            "SELECT started_at, source_file, rows_loaded, rows_rejected FROM etl_run "
-            "ORDER BY run_id DESC LIMIT 1"
-        ).fetchone()
-        counts = probe.execute(
-            """
-            SELECT (SELECT COUNT(*) FROM dim_report),
-                   (SELECT COUNT(*) FROM dim_table),
-                   (SELECT COUNT(*) FROM fact_table_size),
-                   (SELECT COUNT(*) FROM fact_report_usage WHERE exec_count IS NOT NULL),
-                   (SELECT COUNT(*) FROM dim_report WHERE uses_view),
-                   (SELECT COUNT(DISTINCT network) FROM dim_report WHERE network IS NOT NULL)
-            """
-        ).fetchone()
+        version = db_schema_version(probe)
+        try:
+            run = probe.execute(
+                "SELECT started_at, source_file, rows_loaded, rows_rejected FROM etl_run "
+                "ORDER BY run_id DESC LIMIT 1"
+            ).fetchone()
+            counts = probe.execute(
+                """
+                SELECT (SELECT COUNT(*) FROM dim_report),
+                       (SELECT COUNT(*) FROM dim_table),
+                       (SELECT COUNT(*) FROM fact_table_size),
+                       (SELECT COUNT(*) FROM fact_report_usage WHERE exec_count IS NOT NULL),
+                       (SELECT COUNT(*) FROM dim_report WHERE uses_view),
+                       (SELECT COUNT(DISTINCT network) FROM dim_report WHERE network IS NOT NULL)
+                """
+            ).fetchone()
+        except Exception:  # noqa: BLE001 — структура старая, показать нечего
+            pass
     finally:
         probe.close()
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Отчётов", counts[0])
-    c2.metric("Таблиц", counts[1])
-    c3.metric("С размерами", counts[2])
-    c4.metric("Со статистикой", counts[3])
-    c5.metric("Через view", counts[4])
-    c6.metric("Торговых сетей", counts[5])
+    if version < SCHEMA_VERSION:
+        st.warning(
+            f"База собрана прежней версией программы (структура {version} "
+            f"вместо {SCHEMA_VERSION}). Разделы аналитики пока не откроются — "
+            "нажмите «Загрузить» ниже, и всё заработает."
+        )
+    elif counts:
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Отчётов", counts[0])
+        c2.metric("Таблиц", counts[1])
+        c3.metric("С размерами", counts[2])
+        c4.metric("Со статистикой", counts[3])
+        c5.metric("Через view", counts[4])
+        c6.metric("Торговых сетей", counts[5])
+
     if run:
         st.caption(
             f"Последняя загрузка: {run[0]:%Y-%m-%d %H:%M} из `{run[1]}` — "

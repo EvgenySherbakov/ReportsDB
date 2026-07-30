@@ -14,6 +14,7 @@ import pandas as pd
 from .config import (
     DB_PATH,
     RAW_DIR,
+    SCHEMA_VERSION,
     SQL_DIR,
     VERSION,
     Mapping,
@@ -89,8 +90,9 @@ def build(
         con.execute(
             """
             INSERT INTO etl_run (run_id, started_at, source_file, source_sha256,
-                                 rows_read, rows_loaded, rows_rejected, tool_version)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                                 rows_read, rows_loaded, rows_rejected, tool_version,
+                                 schema_version)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 datetime.now(),
@@ -100,6 +102,7 @@ def build(
                 stats.rows_loaded,
                 stats.rows_rejected,
                 VERSION,
+                SCHEMA_VERSION,
             ],
         )
     finally:
