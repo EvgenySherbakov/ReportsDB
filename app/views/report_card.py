@@ -31,14 +31,27 @@ st.caption(
     "статистика. Повторный щелчок по выбранной строке снимает выбор."
 )
 
-network, plant = rc_selector()
-reports = rc_scope(query("SELECT * FROM v_report_tables_summary"), network, plant)
+# Три фильтра в один ряд: иначе они съедают полэкрана, и разбор выбранной
+# строки уезжает под сгиб — а смотреть на него надо вместе с таблицей.
+SORTS = {
+    "По размеру таблиц": ("tables_total_mb", False),
+    "По числу запусков": ("exec_count", False),
+    "По числу таблиц": ("table_count", False),
+    "По наименованию": ("report_name", True),
+}
 
-view = search_box(
-    reports, ["report_name", "catalog_path", "table_names", "report_no"],
-    "Поиск по наименованию отчёта или таблицы",
-    key="s_card",
-)
+f1, f2, f3 = st.columns([2, 3, 2])
+with f1:
+    network, plant = rc_selector()
+reports = rc_scope(query("SELECT * FROM v_report_tables_summary"), network, plant)
+with f2:
+    view = search_box(
+        reports, ["report_name", "catalog_path", "table_names", "report_no"],
+        "Поиск по отчёту или таблице",
+        key="s_card",
+    )
+with f3:
+    sort_by = st.selectbox("Сортировка", list(SORTS), key="card_sort")
 
 if view.empty:
     st.info("Ничего не найдено. Измените условие поиска.")
@@ -48,47 +61,50 @@ if view.empty:
 # Строки-кнопки, а не st.dataframe: тот выбирает строку только флажком в левой
 # колонке, щелчок по самой строке он игнорирует.
 
-SORTS = {
-    "По размеру таблиц": ("tables_total_mb", False),
-    "По числу запусков": ("exec_count", False),
-    "По числу таблиц": ("table_count", False),
-    "По наименованию": ("report_name", True),
-}
-sort_by = st.selectbox("Сортировка", list(SORTS), key="card_sort")
 column, ascending = SORTS[sort_by]
 ordered = view.sort_values(column, ascending=ascending, na_position="last")
 
+
+def full_list() -> None:
+    """Полный список таблицей — с сортировкой по колонкам и выгрузкой."""
+    with st.expander("Показать таблицей — сортировка по колонкам и выгрузка"):
+        grid = ordered[[
+            "report_no", "report_name", "network", "plant", "catalog_path",
+            "table_count", "tables_total_mb", "tables_exclusive_mb", "exec_count",
+            "avg_duration_sec", "uses_view",
+        ]].reset_index(drop=True)
+        show_table(grid, {
+            "report_no": st.column_config.TextColumn("№", width="small"),
+            "report_name": st.column_config.TextColumn("Отчёт", width="large"),
+            "table_count": st.column_config.NumberColumn("Таблиц"),
+            "tables_total_mb": st.column_config.NumberColumn(
+                "Размер таблиц, МБ", format="%.1f"),
+            "tables_exclusive_mb": st.column_config.NumberColumn(
+                "Из них только его, МБ", format="%.1f"),
+            "exec_count": st.column_config.NumberColumn("Запусков"),
+            "avg_duration_sec": st.column_config.NumberColumn(
+                "Ср. длит., с", format="%.1f"),
+            "uses_view": st.column_config.CheckboxColumn("Через view"),
+        }, height=360)
+        download(grid, "reports.csv", "Выгрузить список отчётов")
+
 full = row_picker(
     ordered, "report_id", "card",
-    lambda r: (
-        f"**{r['report_name']}**  ·  {num(r['table_count'])} табл.  ·  "
-        f"{num(r['tables_total_mb'], ' МБ', 1)}  ·  "
-        f"{num(r['exec_count'])} запусков  ·  {r['plant'] or '—'}"
-    ),
+    [
+        ("Отчёт", 44, lambda r: r["report_name"]),
+        ("Завод", 12, lambda r: r["plant"] or "—"),
+        ("Таблиц", 7, lambda r: num(r["table_count"]), True),
+        ("Размер, МБ", 12, lambda r: num(r["tables_total_mb"], decimals=1), True),
+        ("Запусков", 9, lambda r: num(r["exec_count"]), True),
+        ("Каталог", 30, lambda r: r["catalog_path"]),
+    ],
 )
 
-with st.expander("Показать таблицей — сортировка по колонкам и выгрузка"):
-    grid = ordered[[
-        "report_no", "report_name", "network", "plant", "catalog_path",
-        "table_count", "tables_total_mb", "tables_exclusive_mb", "exec_count",
-        "avg_duration_sec", "uses_view",
-    ]].reset_index(drop=True)
-    show_table(grid, {
-        "report_no": st.column_config.TextColumn("№", width="small"),
-        "report_name": st.column_config.TextColumn("Отчёт", width="large"),
-        "table_count": st.column_config.NumberColumn("Таблиц"),
-        "tables_total_mb": st.column_config.NumberColumn(
-            "Размер таблиц, МБ", format="%.1f"),
-        "tables_exclusive_mb": st.column_config.NumberColumn(
-            "Из них только его, МБ", format="%.1f"),
-        "exec_count": st.column_config.NumberColumn("Запусков"),
-        "avg_duration_sec": st.column_config.NumberColumn("Ср. длит., с", format="%.1f"),
-        "uses_view": st.column_config.CheckboxColumn("Через view"),
-    }, height=360)
-    download(grid, "reports.csv", "Выгрузить список отчётов")
-
 if full is None:
+    # Свёрнутая таблица и выгрузка — в самом низу страницы: между списком и
+    # карточкой они отодвинули бы карточку за нижний край экрана.
     st.info("👆 Щёлкните по строке отчёта, чтобы увидеть его карточку.")
+    full_list()
     st.stop()
 
 # --- Карточка выбранного отчёта ---------------------------------------------
@@ -244,3 +260,6 @@ if neighbours.empty:
     st.caption("Ни одна таблица этого отчёта не используется другими отчётами.")
 else:
     show_table(neighbours, {"shared_tables": "Общих таблиц"})
+
+st.divider()
+full_list()

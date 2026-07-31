@@ -262,48 +262,102 @@ def is_blank(value) -> bool:
     return value is None or pd.isna(value)
 
 
-# Строки-кнопки выравниваются по левому краю: иначе Streamlit центрирует
-# подпись, и список перестаёт читаться как таблица. Селектор цепляется за
-# класс st-key-<ключ>, который Streamlit вешает на контейнер с key — обёртка
-# из st.markdown кнопки не охватывает, они рендерятся отдельными блоками.
-# Внутри кнопки Streamlit ещё два слоя (div и span) со своим
-# justify-content: center — выравнивать нужно каждый, иначе подпись остаётся
-# по центру, сколько ни правь саму кнопку.
+# Строка-кнопка должна читаться как строка таблицы, а не как кнопка: без
+# рамки, без фона, с тонкой линией снизу и в один-два ряда пикселей отступа.
+# Иначе двенадцать строк занимают весь экран и разбор под таблицей не виден.
+#
+# Тонкости, каждая из которых проверена в браузере:
+# - селектор цепляется за класс st-key-<ключ> на контейнере с key: обёртка из
+#   st.markdown кнопки не охватывает, они рендерятся отдельными блоками;
+# - внутри кнопки ещё два слоя (div и span) со своим justify-content: center —
+#   выравнивать нужно каждый;
+# - вертикальный блок Streamlit ставит между элементами gap 16px, из-за него
+#   строки разъезжаются на полэкрана;
+# - фон гасим только у secondary: у выбранной строки (primary) он и есть
+#   подсветка выбора.
 _ROW_CSS = """
 <style>
+.st-key-%(key)s { gap: 0 !important; }
 .st-key-%(key)s button {
-    padding-top: 0.3rem;
-    padding-bottom: 0.3rem;
+    padding: 0.14rem 0.5rem !important;
+    min-height: 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.22) !important;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace !important;
+    font-size: 0.78rem !important;
+    line-height: 1.5 !important;
+}
+.st-key-%(key)s button[kind="secondary"] { background: transparent !important; }
+.st-key-%(key)s button[kind="secondary"]:hover {
+    background: rgba(42, 120, 214, 0.12) !important;
 }
 .st-key-%(key)s button,
 .st-key-%(key)s button > div,
-.st-key-%(key)s button span {
-    justify-content: flex-start !important;
-}
+.st-key-%(key)s button span { justify-content: flex-start !important; }
+/* Шрифт задаём и на p, и на контейнере разметки: правило Streamlit для
+   markdown-абзаца перебивает наследование, и ячейки перестают быть
+   моноширинными — колонки разъезжаются. */
 .st-key-%(key)s button > div,
 .st-key-%(key)s button span,
-.st-key-%(key)s button p {
+.st-key-%(key)s button p,
+.st-key-%(key)s button [data-testid="stMarkdownContainer"] p {
     width: 100%%;
     text-align: left !important;
     margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace !important;
+    font-size: 0.78rem !important;
+    white-space: pre !important;
+    overflow: hidden;
+}
+/* Шапка — такая же кнопка, только выключенная: только так её метрики
+   гарантированно совпадают с ячейками. Отдельный div подобрать по шрифту
+   не удалось. */
+.st-key-%(key)s button:disabled {
+    opacity: 1 !important;
+    color: rgba(128, 128, 128, 0.95) !important;
+    border-bottom: 2px solid rgba(128, 128, 128, 0.5) !important;
+    cursor: default !important;
 }
 </style>
 """
+
+NBSP = " "
+# Символы, которые Streamlit истолкует как разметку. В наименованиях отчётов
+# встречается и подчёркивание, и звёздочка — без экранирования подпись поедет.
+_MD_SPECIAL = str.maketrans({c: "\\" + c for c in "\\*_[]`~"})
+
+
+def _cell(text: str, width: int, right: bool = False) -> str:
+    """Ячейка фиксированной ширины: обрезает длинное, добивает короткое.
+
+    Добивка неразрывными пробелами: обычные Streamlit схлопнет как разметку,
+    и колонки перестанут совпадать со шапкой.
+    """
+    text = "" if text is None else str(text)
+    if len(text) > width:
+        text = text[: width - 1] + "…"
+    pad = NBSP * (width - len(text))
+    return (pad + text if right else text + pad) + NBSP
 
 
 def row_picker(
     df: pd.DataFrame,
     id_column: str,
     key: str,
-    label: Callable[[pd.Series], str],
-    page_size: int = 15,
+    columns: list[tuple],
+    page_size: int = 12,
 ) -> pd.Series | None:
-    """Список строк, где нажимается вся строка целиком.
+    """Таблица, в которой нажимается вся строка целиком.
 
     `st.dataframe` умеет выбирать строку только флажком в левой колонке —
-    щелчок по самой строке он игнорирует (проверено на Streamlit 1.60).
-    Заказчику нужен именно щелчок по строке, поэтому каждая строка — кнопка
-    во всю ширину.
+    щелчок по самой строке он игнорирует (проверено на Streamlit 1.60, это
+    последняя версия). Заказчику нужен щелчок по строке, поэтому строка —
+    кнопка, а вид таблицы держится на моноширинном шрифте и колонках
+    фиксированной ширины.
+
+    `columns` — список `(заголовок, ширина в знаках, функция от строки)`;
+    четвёртым элементом можно передать True для выравнивания вправо.
 
     Выбор хранится по значению `id_column`, а не по номеру строки: при смене
     сортировки или фильтра номер уезжает, а выбранная строка должна остаться
@@ -322,12 +376,21 @@ def row_picker(
     start = (page - 1) * page_size
     window = df.iloc[start:start + page_size]
 
+    header = "".join(
+        _cell(spec[0], spec[1], len(spec) > 3 and spec[3]) for spec in columns
+    ).translate(_MD_SPECIAL)
+
     with st.container(key=box_key):
+        st.button(header, key=f"{key}_head", use_container_width=True, disabled=True)
         for _, row in window.iterrows():
             row_id = row[id_column]
             selected = st.session_state.get(chosen_key) == row_id
+            label = "".join(
+                _cell(spec[2](row), spec[1], len(spec) > 3 and spec[3])
+                for spec in columns
+            ).translate(_MD_SPECIAL)
             if st.button(
-                label(row),
+                label,
                 key=f"{key}_row_{row_id}",
                 use_container_width=True,
                 type="primary" if selected else "secondary",

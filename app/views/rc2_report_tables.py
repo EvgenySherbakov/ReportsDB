@@ -27,19 +27,22 @@ st.caption(
     "generated-объекты исключены — они не отражают физического хранения."
 )
 
-network, plant = rc_selector()
+# Выбор РЦ и показатели в одном ряду: чем меньше занято сверху, тем вернее
+# разбор выбранной строки попадёт на тот же экран, что и таблица.
+s0, c1, c2, c3 = st.columns([3, 2, 2, 2])
+with s0:
+    network, plant = rc_selector()
 df = rc_scope(query("SELECT * FROM v_rc_report_tables"), network, plant)
 
 if df.empty:
     st.info("Для выбранного РЦ нет ни одной связи отчёта с таблицей.")
     st.stop()
 
-c1, c2, c3 = st.columns(3)
 c1.metric("Отчётов", num(df["report_name"].nunique()))
 c2.metric("Уникальных таблиц", num(df["table_full_name"].nunique()))
 c3.metric(
-    "Таблиц на отчёт, среднее",
-    num(len(df) / df["report_name"].nunique(), decimals=1),
+    "Таблиц на отчёт", num(len(df) / df["report_name"].nunique(), decimals=1),
+    help="В среднем.",
 )
 
 by_reports, by_tables = st.tabs(["По отчётам", "По таблицам"])
@@ -47,7 +50,6 @@ by_reports, by_tables = st.tabs(["По отчётам", "По таблицам"]
 # --- Вид 1: строка — отчёт ---------------------------------------------------
 
 with by_reports:
-    st.caption("Строка — отчёт. Видно, из каких таблиц он состоит.")
     reports = (
         df.groupby(["report_name", "network", "plant", "catalog_path"], as_index=False)
         .agg(
@@ -65,18 +67,21 @@ with by_reports:
         + reports["catalog_path"].astype(str) + "|" + reports["report_name"]
     )
     found = search_box(reports, ["report_name", "catalog_path"],
-                       "Поиск по наименованию отчёта", key="s_rc2_rep")
+                       "Строка — отчёт. Поиск по наименованию отчёта",
+                       key="s_rc2_rep")
 
     picked = row_picker(
         found, "row_key", "rc2rep",
-        lambda r: (
-            f"**{r['report_name']}**  ·  {r['table_count']} табл.  ·  "
-            f"{num(r['total_mb'], ' МБ', 1)}  ·  `{r['catalog_path']}`"
-        ),
+        [
+            ("Отчёт", 44, lambda r: r["report_name"]),
+            ("Завод", 12, lambda r: r["plant"] or "—"),
+            ("Таблиц", 7, lambda r: num(r["table_count"]), True),
+            ("Объём, МБ", 12, lambda r: num(r["total_mb"], decimals=1), True),
+            ("Каталог", 34, lambda r: r["catalog_path"]),
+        ],
     )
-    download(found.drop(columns=["row_key"]), "rc_2_by_reports.csv",
-             "Выгрузить: отчёты и их таблицы")
-
+    # Выгрузка — под разбором, а не между списком и разбором: иначе она
+    # отодвигает разбор за нижний край экрана.
     if picked is None:
         st.info("👆 Щёлкните по строке отчёта — ниже появится разбор.")
     else:
@@ -119,10 +124,12 @@ with by_reports:
             },
         )
 
+    download(found.drop(columns=["row_key"]), "rc_2_by_reports.csv",
+             "Выгрузить: отчёты и их таблицы")
+
 # --- Вид 2: строка — таблица -------------------------------------------------
 
 with by_tables:
-    st.caption("Строка — таблица. Видно, в какие отчёты она попадает.")
     tables = (
         df.groupby(["table_full_name", "schema_name"], as_index=False)
         .agg(
@@ -133,23 +140,19 @@ with by_tables:
         .sort_values("report_count", ascending=False)
         .reset_index(drop=True)
     )
-    st.caption(
-        "Объём взят как максимум по строкам таблицы, а не как сумма: одна и та "
-        "же таблица приходит здесь в нескольких отчётах, и складывать её "
-        "размер заново на каждый отчёт нельзя."
-    )
     found_t = search_box(tables, ["table_full_name", "schema_name"],
-                         "Поиск по наименованию таблицы", key="s_rc2_tab")
+                         "Строка — таблица. Поиск по наименованию таблицы",
+                         key="s_rc2_tab")
 
     picked_t = row_picker(
         found_t, "table_full_name", "rc2tab",
-        lambda r: (
-            f"**{r['table_full_name']}**  ·  в {r['report_count']} отчётах  ·  "
-            f"{num(r['total_mb'], ' МБ', 1)}"
-        ),
+        [
+            ("Таблица", 46, lambda r: r["table_full_name"]),
+            ("Отчётов", 9, lambda r: num(r["report_count"]), True),
+            ("Объём, МБ", 12, lambda r: num(r["total_mb"], decimals=1), True),
+            ("Глубина, дн.", 12, lambda r: num(r["retention_days"]), True),
+        ],
     )
-    download(found_t, "rc_2_by_tables.csv", "Выгрузить: таблицы и их отчёты")
-
     if picked_t is None:
         st.info("👆 Щёлкните по строке таблицы — ниже появится разбор.")
     else:
@@ -183,3 +186,10 @@ with by_tables:
             .drop_duplicates()
             .sort_values("report_name"),
         )
+
+    download(found_t, "rc_2_by_tables.csv", "Выгрузить: таблицы и их отчёты")
+    st.caption(
+        "Объём взят как максимум по строкам таблицы, а не как сумма: одна и та "
+        "же таблица приходит здесь в нескольких отчётах, и складывать её "
+        "размер заново на каждый отчёт нельзя."
+    )
