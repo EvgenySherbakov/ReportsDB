@@ -240,6 +240,27 @@ def search_box(
     return found
 
 
+def num(value, suffix: str = "", decimals: int = 0) -> str:
+    """Число для показателя. Пустое значение — прочерк, а не «nan» и не сбой.
+
+    Проверять пустоту сравнением `x != x` нельзя: у nullable-типов pandas
+    ячейка приходит как `pd.NA`, а `pd.NA != pd.NA` возвращает не True, а сам
+    `pd.NA` — Streamlit падает с «boolean value of NA is ambiguous».
+    Единственная надёжная проверка — `pd.isna`.
+
+    Заодно решает вторую задачу: в строке есть NULL-колонки, из-за чего pandas
+    приводит весь ряд к float, и счётчики нужно возвращать к целым явно.
+    """
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{value:,.{decimals}f}".replace(",", " ") + suffix
+
+
+def is_blank(value) -> bool:
+    """Пустое ли значение. Безопасно для pd.NA, NaN, None и обычных чисел."""
+    return value is None or pd.isna(value)
+
+
 def download(df: pd.DataFrame, filename: str, label: str = "Выгрузить CSV") -> None:
     st.download_button(
         label,

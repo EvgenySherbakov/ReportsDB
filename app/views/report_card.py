@@ -13,6 +13,8 @@ from _shared import (
     ACCENT,
     SECONDARY,
     download,
+    is_blank,
+    num,
     page_setup,
     query,
     rc_scope,
@@ -92,38 +94,26 @@ st.caption(
 )
 
 m1, m2, m3, m4, m5 = st.columns(5)
-m1.metric("Таблиц", int(full["table_count"]))
+m1.metric("Таблиц", num(full["table_count"]))
 m2.metric(
-    "Суммарный размер, МБ",
-    f"{full['tables_total_mb']:,.1f}".replace(",", " "),
+    "Суммарный размер, МБ", num(full["tables_total_mb"], decimals=1),
     help="Сумма размеров всех таблиц отчёта.",
 )
 m3.metric(
-    "Только его, МБ",
-    f"{full['tables_exclusive_mb']:,.1f}".replace(",", " "),
+    "Только его, МБ", num(full["tables_exclusive_mb"], decimals=1),
     help="Таблицы, которых не касается ни один другой отчёт. Столько "
          "освободится при выводе отчёта из эксплуатации.",
 )
-m4.metric(
-    "Запусков",
-    "—" if full["exec_count"] is None or full["exec_count"] != full["exec_count"]
-    else f"{full['exec_count']:,.0f}".replace(",", " "),
-)
-m5.metric(
-    "Ср. длительность, с",
-    "—" if full["avg_duration_sec"] != full["avg_duration_sec"]
-    else f"{full['avg_duration_sec']:.1f}",
-)
+m4.metric("Запусков", num(full["exec_count"]))
+m5.metric("Ср. длительность, с", num(full["avg_duration_sec"], decimals=1))
 
 n1, n2, n3, n4, n5 = st.columns(5)
-n1.metric("View", int(full["view_count"]))
-n2.metric("Mat.view", int(full["matview_count"]))
-n3.metric("Временных", int(full["temp_count"]))
-n4.metric("Функций/процедур", int(full["routine_count"]))
+n1.metric("View", num(full["view_count"]))
+n2.metric("Mat.view", num(full["matview_count"]))
+n3.metric("Временных", num(full["temp_count"]))
+n4.metric("Функций/процедур", num(full["routine_count"]))
 n5.metric(
-    "Глубина, дней",
-    "—" if full["retention_days"] != full["retention_days"]
-    else f"{full['retention_days']:.0f}",
+    "Глубина, дней", num(full["retention_days"]),
     help="Максимум по таблицам отчёта.",
 )
 
@@ -132,13 +122,12 @@ if full["uses_view"] is True:
         "Отчёт обращается к данным через view: за ним могут стоять таблицы, "
         "которых нет в списке ниже. Размер посчитан не полностью."
     )
-if full["size_coverage_pct"] is not None and full["size_coverage_pct"] == full["size_coverage_pct"]:
-    if full["size_coverage_pct"] < 100:
-        st.info(
-            f"Размер известен по {full['size_coverage_pct']:.0f}% таблиц отчёта "
-            f"({int(full['sized_table_count'])} из {int(full['table_count'])}). "
-            "Суммарный объём — нижняя оценка."
-        )
+if not is_blank(full["size_coverage_pct"]) and full["size_coverage_pct"] < 100:
+    st.info(
+        f"Размер известен по {full['size_coverage_pct']:.0f}% таблиц отчёта "
+        f"({num(full['sized_table_count'])} из {num(full['table_count'])}). "
+        "Суммарный объём — нижняя оценка."
+    )
 
 # --- Таблицы отчёта ----------------------------------------------------------
 

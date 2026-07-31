@@ -10,6 +10,7 @@ from _shared import (
     ACCENT,
     download,
     missing_facts_notice,
+    num,
     page_setup,
     query,
     show_table,
@@ -32,17 +33,6 @@ kpi = query(
         (SELECT ROUND(AVG(size_coverage_pct), 0) FROM v_report_footprint) AS coverage
     """
 ).iloc[0]
-
-
-def num(value, suffix: str = "", decimals: int = 0) -> str:
-    """Число для KPI. Пустое значение — прочерк, а не «nan».
-
-    В строке есть NULL-колонки, поэтому pandas приводит весь ряд к float:
-    счётчики нужно возвращать к целым явно.
-    """
-    if value is None or pd.isna(value):
-        return "—"
-    return f"{value:,.{decimals}f}".replace(",", " ") + suffix
 
 
 c1, c2, c3, c4 = st.columns(4)
