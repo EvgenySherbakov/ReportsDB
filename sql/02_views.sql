@@ -427,3 +427,82 @@ LEFT JOIN bridge_report_table b ON b.report_id = r.report_id
 LEFT JOIN dim_table t           ON t.table_id  = b.table_id
 GROUP BY 1, 2
 ORDER BY report_count DESC;
+
+
+-- 6.7. Отчёт и его таблицы одной строкой ----------------------------------
+-- Прямо отвечает на вопрос «на какие таблицы ссылается отчёт и сколько они
+-- весят суммарно». Питает карточку отчёта и страницу объёма.
+CREATE VIEW v_report_tables_summary AS
+WITH tbl AS (
+    SELECT
+        b.report_id,
+        t.table_id,
+        t.full_name,
+        s.total_mb,
+        s.percent_of_total,
+        s.retention_days,
+        (SELECT COUNT(DISTINCT x.report_id)
+         FROM bridge_report_table x WHERE x.table_id = t.table_id) AS used_by_reports
+    FROM bridge_report_table b
+    JOIN dim_table t            ON t.table_id = b.table_id
+    LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+    WHERE t.object_kind = 'TABLE'
+),
+agg AS (
+    SELECT
+        report_id,
+        COUNT(*)                                                   AS table_count,
+        COUNT(*) FILTER (WHERE total_mb IS NOT NULL)               AS sized_table_count,
+        COUNT(*) FILTER (WHERE used_by_reports = 1)                AS exclusive_table_count,
+        ROUND(COALESCE(SUM(total_mb), 0), 2)                       AS tables_total_mb,
+        ROUND(COALESCE(SUM(total_mb) FILTER (WHERE used_by_reports = 1), 0), 2)
+                                                                   AS tables_exclusive_mb,
+        ROUND(COALESCE(SUM(percent_of_total), 0), 3)               AS tables_pct_of_db,
+        MAX(retention_days)                                        AS retention_days,
+        string_agg(full_name, ', ' ORDER BY total_mb DESC NULLS LAST) AS table_names
+    FROM tbl
+    GROUP BY report_id
+),
+other AS (
+    SELECT
+        b.report_id,
+        COUNT(*) FILTER (WHERE t.object_kind = 'VIEW')              AS view_count,
+        COUNT(*) FILTER (WHERE t.object_kind = 'MATERIALIZED VIEW') AS matview_count,
+        COUNT(*) FILTER (WHERE t.object_kind = 'TEMP')              AS temp_count,
+        COUNT(*) FILTER (WHERE t.object_kind = 'ROUTINE')           AS routine_count
+    FROM bridge_report_table b
+    JOIN dim_table t ON t.table_id = b.table_id
+    GROUP BY b.report_id
+)
+SELECT
+    r.report_id,
+    r.report_no,
+    r.report_name,
+    r.network,
+    r.plant,
+    r.catalog_path,
+    r.uses_view,
+    COALESCE(a.table_count, 0)           AS table_count,
+    COALESCE(a.sized_table_count, 0)     AS sized_table_count,
+    COALESCE(a.exclusive_table_count, 0) AS exclusive_table_count,
+    COALESCE(a.tables_total_mb, 0)       AS tables_total_mb,
+    COALESCE(a.tables_exclusive_mb, 0)   AS tables_exclusive_mb,
+    COALESCE(a.tables_pct_of_db, 0)      AS tables_pct_of_db,
+    a.retention_days,
+    a.table_names,
+    COALESCE(o.view_count, 0)            AS view_count,
+    COALESCE(o.matview_count, 0)         AS matview_count,
+    COALESCE(o.temp_count, 0)            AS temp_count,
+    COALESCE(o.routine_count, 0)         AS routine_count,
+    u.exec_count,
+    u.avg_duration_sec,
+    ROUND(u.exec_count * u.avg_duration_sec, 1) AS total_duration_sec,
+    CASE
+        WHEN a.table_count IS NULL OR a.table_count = 0 THEN NULL
+        ELSE ROUND(100.0 * a.sized_table_count / a.table_count, 1)
+    END AS size_coverage_pct
+FROM dim_report r
+LEFT JOIN agg   a ON a.report_id = r.report_id
+LEFT JOIN other o ON o.report_id = r.report_id
+LEFT JOIN fact_report_usage u ON u.report_id = r.report_id
+ORDER BY tables_total_mb DESC;

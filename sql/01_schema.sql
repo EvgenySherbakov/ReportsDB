@@ -1,6 +1,7 @@
 -- Схема БД отчётности SSRS. См. docs/TZ.md, раздел 4.
 -- Скрипт выполняется на чистой БД (ETL пересоздаёт файл), но написан идемпотентно.
 
+DROP VIEW IF EXISTS v_report_tables_summary;
 DROP VIEW IF EXISTS v_rc_summary;
 DROP VIEW IF EXISTS v_rc_report_retention;
 DROP VIEW IF EXISTS v_rc_report_usage;

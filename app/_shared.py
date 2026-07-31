@@ -33,8 +33,8 @@ FOOTPRINT_HINT = (
 
 
 def page_setup(title: str, icon: str = "📊") -> None:
-    st.set_page_config(page_title=f"{title} · ReportsDB", page_icon=icon, layout="wide")
-    st.title(title)
+    """Заголовок страницы. set_page_config вызывается один раз в Home.py."""
+    st.title(f"{icon} {title}" if icon else title)
 
 
 def surface_color() -> str:
@@ -178,6 +178,65 @@ def show_table(df: pd.DataFrame, extra: dict | None = None, **kwargs) -> pd.Data
     st.dataframe(view, use_container_width=True, hide_index=True,
                  column_config=config, **kwargs)
     return view
+
+
+ALL = "(все)"
+
+
+def rc_selector(label: str = "Распределительный центр") -> tuple[str | None, str | None]:
+    """Выбор РЦ, общий для всех страниц раздела.
+
+    Выбор хранится в session_state, поэтому при переходе между страницами
+    раздела он не сбрасывается. Возвращает (сеть, завод) либо (None, None).
+    """
+    rc = query(
+        "SELECT DISTINCT COALESCE(network, '(не указана)') AS network, "
+        "COALESCE(plant, '(не указан)') AS plant FROM dim_report ORDER BY 1, 2"
+    )
+    options = [ALL] + [f"{r.network} · {r.plant}" for r in rc.itertuples()]
+    chosen = st.selectbox(
+        label, options, key="rc_choice",
+        help="РЦ определяется парой «сеть + завод»: одно имя завода встречается "
+             "в разных сетях и означает разные площадки.",
+    )
+    if chosen == ALL:
+        return None, None
+    network, plant = chosen.split(" · ", 1)
+    return network, plant
+
+
+def rc_scope(df: pd.DataFrame, network: str | None, plant: str | None) -> pd.DataFrame:
+    """Оставляет строки выбранного РЦ."""
+    if network is None or "network" not in df.columns:
+        return df
+    return df[(df["network"].fillna("(не указана)") == network)
+              & (df["plant"].fillna("(не указан)") == plant)]
+
+
+def search_box(
+    df: pd.DataFrame,
+    columns: list[str],
+    label: str = "Поиск по наименованию таблицы или отчёта",
+    key: str | None = None,
+) -> pd.DataFrame:
+    """Единый фильтр поиска: одно поле ищет сразу по нескольким колонкам.
+
+    Заказчик просил, чтобы во всех таблицах можно было найти строку и по имени
+    таблицы, и по имени отчёта — поэтому поле одно, а колонок несколько.
+    """
+    present = [c for c in columns if c in df.columns]
+    if not present:
+        return df
+    text = st.text_input(label, "", key=key,
+                         placeholder="часть имени таблицы или отчёта…")
+    if not text:
+        return df
+    mask = False
+    for column in present:
+        mask = mask | df[column].astype(str).str.contains(text, case=False, na=False)
+    found = df[mask]
+    st.caption(f"Найдено строк: {len(found)} из {len(df)}.")
+    return found
 
 
 def download(df: pd.DataFrame, filename: str, label: str = "Выгрузить CSV") -> None:

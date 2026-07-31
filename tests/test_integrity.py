@@ -47,6 +47,7 @@ VIEWS = [
     "v_rc_report_usage",
     "v_rc_report_retention",
     "v_rc_summary",
+    "v_report_tables_summary",
 ]
 
 # Каждое поле, приходящее из исходных файлов, обязано быть видно в аналитике —
@@ -58,6 +59,7 @@ FIELDS_IN_ANALYTICS = [
     "percent_of_total", "exclusive_pct_of_db", "segment_count",
     "total_mb", "schema_name", "table_name",
     "object_kind", "kind_source", "retention_days", "retention_band", "usage_band",
+    "tables_total_mb", "tables_exclusive_mb", "table_names",
 ]
 
 
@@ -318,8 +320,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 4.
-    expected = "e8e369"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 5.
+    expected = "781f44"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -534,6 +536,43 @@ def test_object_kinds_are_loaded_from_columns(full_db):
         "AND kind_source <> 'колонка'"
     ).fetchone()[0]
     assert guessed == 0, "тип, отличный от таблицы, должен приходить из колонки"
+
+
+def test_report_summary_totals_match_its_tables(full_db):
+    """«Отчёт ссылается на такие-то таблицы, которые весят столько-то» —
+    сумма в сводке обязана совпадать с суммой по её же таблицам."""
+    mismatch = full_db.execute(
+        """
+        WITH per_report AS (
+            SELECT b.report_id, ROUND(COALESCE(SUM(s.total_mb), 0), 2) AS mb,
+                   COUNT(*) AS n
+            FROM bridge_report_table b
+            JOIN dim_table t            ON t.table_id = b.table_id
+            LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+            WHERE t.object_kind = 'TABLE'
+            GROUP BY b.report_id
+        )
+        SELECT COUNT(*) FROM v_report_tables_summary v
+        JOIN per_report p ON p.report_id = v.report_id
+        WHERE ABS(p.mb - v.tables_total_mb) > 0.02 OR p.n <> v.table_count
+        """
+    ).fetchone()[0]
+    assert mismatch == 0
+
+
+def test_report_summary_lists_table_names(full_db):
+    """В сводке перечислены сами таблицы, а не только их число."""
+    row = full_db.execute(
+        "SELECT table_count, table_names FROM v_report_tables_summary "
+        "WHERE table_count > 1 LIMIT 1"
+    ).fetchone()
+    assert row and row[1] and row[1].count(",") == row[0] - 1
+
+
+def test_report_summary_covers_every_report(full_db):
+    reports = full_db.execute("SELECT COUNT(*) FROM dim_report").fetchone()[0]
+    rows = full_db.execute("SELECT COUNT(*) FROM v_report_tables_summary").fetchone()[0]
+    assert rows == reports
 
 
 def test_object_kind_masks_are_off_by_default():
