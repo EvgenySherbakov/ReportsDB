@@ -124,7 +124,6 @@ LABELS = {
     "table_full_name": "Таблица",
     "routine_full_name": "Функция / процедура",
     "routine_name": "Имя",
-    "size_unknown": "Нет в файле размеров",
     "plant_count": "Заводов",
     "measured_at": "Дата замера",
     "tables_with_retention": "Таблиц с глубиной",

@@ -321,8 +321,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 6.
-    expected = "d0838e"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 7.
+    expected = "53d506"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -456,13 +456,37 @@ def test_total_duration_is_execs_times_average(full_db):
 
 # --- Пять основных представлений в разрезе РЦ ----------------------------
 
-def test_tables_catalog_holds_every_size_row(full_db):
-    """Таблица №1 — ВСЕ строки файла размеров, без потерь."""
+def test_tables_catalog_is_exactly_the_size_file(full_db):
+    """Таблица №1 — ровно строки файла размеров: ни потерь, ни добавок.
+
+    Список таблиц БД берётся только из файла размеров. Объекты, упомянутые
+    в отчётах, но отсутствующие в файле, в него не подмешиваются: мост
+    «отчёт ↔ таблица» лишь ссылается на этот список.
+    """
     sizes = full_db.execute("SELECT COUNT(*) FROM fact_table_size").fetchone()[0]
-    in_catalog = full_db.execute(
-        "SELECT COUNT(*) FROM v_tables_catalog WHERE NOT size_unknown"
-    ).fetchone()[0]
+    in_catalog = full_db.execute("SELECT COUNT(*) FROM v_tables_catalog").fetchone()[0]
     assert in_catalog == sizes
+
+
+def test_tables_catalog_adds_nothing_from_reports(full_db):
+    """В каталоге нет ни одной таблицы, которой нет в файле размеров.
+
+    В демо-данных отчёты заведомо ссылаются на объекты без замера (мусорные
+    имена, view, временные) — они обязаны остаться за пределами №1.
+    """
+    dangling = full_db.execute(
+        "SELECT COUNT(*) FROM dim_table t "
+        "WHERE EXISTS (SELECT 1 FROM bridge_report_table b WHERE b.table_id = t.table_id) "
+        "  AND NOT EXISTS (SELECT 1 FROM fact_table_size s WHERE s.table_id = t.table_id)"
+    ).fetchone()[0]
+    assert dangling > 0, "проверка бессмысленна, если таких ссылок нет вовсе"
+
+    leaked = full_db.execute(
+        "SELECT COUNT(*) FROM v_tables_catalog c "
+        "WHERE NOT EXISTS (SELECT 1 FROM fact_table_size s JOIN dim_table t "
+        "                  ON t.table_id = s.table_id WHERE t.full_name = c.full_name)"
+    ).fetchone()[0]
+    assert leaked == 0
 
 
 def test_tables_catalog_is_independent_of_reports(full_db):

@@ -317,11 +317,13 @@ ORDER BY jaccard DESC, p.shared_tables DESC;
 -- =========================================================================
 
 -- 6.1. Таблица №1 — все таблицы и их размеры ------------------------------
--- ПОЛНЫЙ список из файла размеров: строка на пару «таблица + завод».
--- Витрина НЕ зависит от отчётов — таблица попадает сюда, даже если на неё не
--- ссылается ни один отчёт. Колонка report_count добавлена справочно.
--- Замыкающая часть UNION добавляет объекты, которые есть в отчётах, но
--- отсутствуют в файле размеров: иначе они пропали бы из списка совсем.
+-- Источник списка таблиц БД — ТОЛЬКО файл размеров. Строка на пару
+-- «таблица + завод», ровно как в файле; ничего к нему не добавляется.
+-- Витрина НЕ зависит от отчётов и в обратную сторону тоже: объекты, которые
+-- упомянуты в отчётах, но в файле размеров отсутствуют, сюда НЕ подмешиваются
+-- — мост «отчёт ↔ таблица» только ссылается на этот список. Сколько таких
+-- ссылок повисло без размера, видно в size_coverage_pct отчёта.
+-- Колонка report_count добавлена справочно и на состав строк не влияет.
 CREATE VIEW v_tables_catalog AS
 SELECT
     s.network,
@@ -337,28 +339,10 @@ SELECT
     s.retention_days,
     s.segment_count,
     s.measured_at,
-    FALSE AS size_unknown,
     (SELECT COUNT(DISTINCT b.report_id) FROM bridge_report_table b
      WHERE b.table_id = t.table_id) AS report_count
 FROM fact_table_size s
-JOIN dim_table t ON t.table_id = s.table_id
-
-UNION ALL
-
-SELECT
-    '(нет в файле размеров)' AS network,
-    '(нет в файле размеров)' AS plant,
-    t.full_name,
-    t.schema_name,
-    t.table_name,
-    t.object_kind,
-    t.kind_source,
-    NULL, NULL, NULL, NULL, NULL, NULL,
-    TRUE AS size_unknown,
-    (SELECT COUNT(DISTINCT b.report_id) FROM bridge_report_table b
-     WHERE b.table_id = t.table_id) AS report_count
-FROM dim_table t
-WHERE NOT EXISTS (SELECT 1 FROM fact_table_size s WHERE s.table_id = t.table_id);
+JOIN dim_table t ON t.table_id = s.table_id;
 
 -- 6.2. Таблица №2 — отчёт и его таблицы, один ко многим --------------------
 -- Только настоящие таблицы: view, материализованные view, временные и

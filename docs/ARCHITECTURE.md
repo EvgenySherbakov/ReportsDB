@@ -120,7 +120,7 @@
 | `v_decommission_candidates` | Что можно выводить и сколько это освободит |
 | `v_catalog_overview`, `v_schema_overview` | Сводка по папкам и схемам |
 | `v_report_overlap` | Отчёты с почти совпадающим набором источников |
-| `v_tables_catalog`, `v_rc_report_tables`, `v_rc_report_routines`, `v_rc_report_usage`, `v_rc_report_retention` | Пять основных представлений в разрезе РЦ |
+| `v_tables_catalog`, `v_rc_report_tables`, `v_rc_report_routines`, `v_rc_report_usage`, `v_rc_report_retention` | Пять основных представлений в разрезе РЦ. №1 — ровно содержимое файла размеров: список таблиц БД берётся только оттуда |
 | `v_report_table_size` | Размер таблицы для конкретного отчёта: берёт замер завода этого отчёта. Через неё соединяются отчёты и размеры |
 | `v_report_tables_summary` | Отчёт, его таблицы одной строкой и их суммарный размер |
 
