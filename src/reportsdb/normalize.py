@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from typing import Any
 
@@ -108,6 +109,22 @@ def parse_table_list(raw: Any, separator: str = ";") -> list[tuple[str, str, boo
         key = f"{parsed[0]}.{parsed[1]}".lower()
         seen.setdefault(key, parsed)
     return list(seen.values())
+
+
+def match_object_kind(
+    table_name: str, patterns: dict[str, list[str]]
+) -> str | None:
+    """Тип объекта по маске имени: {"VIEW": ["V_*"]} → "VIEW".
+
+    Маски задаются в config/mapping.yml и по умолчанию пусты — тип берётся из
+    явных колонок файла. Возвращает None, если ни одна маска не подошла.
+    """
+    name = table_name.strip().upper()
+    for kind, masks in patterns.items():
+        for mask in masks:
+            if fnmatch.fnmatch(name, mask.strip().upper()):
+                return kind
+    return None
 
 
 def full_name_key(schema_name: str, table_name: str) -> str:

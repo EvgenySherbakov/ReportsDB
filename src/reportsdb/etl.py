@@ -26,6 +26,7 @@ from .excel import read_sheet
 from .normalize import (
     clean_text,
     full_name_key,
+    match_object_kind,
     join_folders,
     normalise_catalog_path,
     parse_bool,
@@ -33,6 +34,20 @@ from .normalize import (
     split_folders,
     to_number,
 )
+
+
+# Колонка файла → тип объекта. Порядок важен: явная колонка перекрывает
+# и маску, и умолчание, поэтому список таблиц обрабатывается первым.
+SOURCE_COLUMNS = [
+    ("source_tables", "TABLE"),
+    ("source_views", "VIEW"),
+    ("source_matviews", "MATERIALIZED VIEW"),
+    ("source_temp_tables", "TEMP"),
+    ("source_routines", "ROUTINE"),
+]
+
+# Чем выше приоритет, тем надёжнее источник типа объекта.
+KIND_PRIORITY = {"по умолчанию": 0, "маска": 1, "колонка": 2}
 
 
 @dataclass
@@ -44,6 +59,7 @@ class LoadStats:
     links: int = 0
     unparsed_refs: int = 0
     segments_skipped: int = 0
+    objects_by_kind: dict[str, int] = field(default_factory=dict)
     sizes_loaded: int = 0
     sizes_unmatched: list[str] = field(default_factory=list)
     usage_loaded: int = 0
@@ -135,7 +151,8 @@ def _load_reports(
     reports: list[tuple] = []
     usage: list[tuple] = []
     rejects: list[tuple] = []
-    tables: dict[str, tuple[int, str, str, bool]] = {}  # key → (id, schema, name, ok)
+    # key → [id, схема, имя, разобрано, тип объекта, откуда известен тип]
+    tables: dict[str, list] = {}
     links: set[tuple[int, int]] = set()
     seen_reports: dict[tuple, int] = {}
 
@@ -193,15 +210,36 @@ def _load_reports(
             if execs is not None or duration is not None:
                 usage.append((report_id, _as_int(execs), duration))
 
-        for schema_name, table_name, ok in parse_table_list(
-            _cell(row, cols.get("source_tables")), section.table_separator
-        ):
-            fkey = full_name_key(schema_name, table_name)
-            if fkey not in tables:
-                tables[fkey] = (len(tables) + 1, schema_name, table_name, ok)
-                if not ok:
-                    stats.unparsed_refs += 1
-            links.add((report_id, tables[fkey][0]))
+        # Тип объекта задаётся колонкой, из которой он пришёл. Если объект
+        # встретился в нескольких колонках, побеждает более надёжный источник.
+        seen_columns: set[str] = set()
+        for field_name, kind in SOURCE_COLUMNS:
+            column = cols.get(field_name)
+            if column is None or column in seen_columns:
+                continue
+            seen_columns.add(column)
+
+            for schema_name, table_name, ok in parse_table_list(
+                _cell(row, column), section.table_separator
+            ):
+                if field_name == "source_tables":
+                    guessed = match_object_kind(table_name, section.object_patterns)
+                    obj_kind = guessed or "TABLE"
+                    origin = "маска" if guessed else "по умолчанию"
+                else:
+                    obj_kind, origin = kind, "колонка"
+
+                fkey = full_name_key(schema_name, table_name)
+                existing = tables.get(fkey)
+                if existing is None:
+                    tables[fkey] = [
+                        len(tables) + 1, schema_name, table_name, ok, obj_kind, origin
+                    ]
+                    if not ok:
+                        stats.unparsed_refs += 1
+                elif KIND_PRIORITY[origin] > KIND_PRIORITY[existing[5]]:
+                    existing[4], existing[5] = obj_kind, origin
+                links.add((report_id, tables[fkey][0]))
 
     _insert(
         con,
@@ -221,14 +259,20 @@ def _load_reports(
     _insert(
         con,
         "dim_table",
-        [(tid, schema, name, key, ok) for key, (tid, schema, name, ok) in tables.items()],
-        ["table_id", "schema_name", "table_name", "full_name", "is_parsed_ok"],
+        [
+            (tid, schema, name, key, kind, origin, ok)
+            for key, (tid, schema, name, ok, kind, origin) in tables.items()
+        ],
+        ["table_id", "schema_name", "table_name", "full_name", "object_kind",
+         "kind_source", "is_parsed_ok"],
     )
     _insert(con, "bridge_report_table", sorted(links), ["report_id", "table_id"])
     _insert(con, "etl_reject", rejects, ["run_id", "source_row", "reason", "payload"])
 
     stats.tables = len(tables)
     stats.links = len(links)
+    for entry in tables.values():
+        stats.objects_by_kind[entry[4]] = stats.objects_by_kind.get(entry[4], 0) + 1
 
 
 def _load_table_sizes(
@@ -281,7 +325,7 @@ def _load_table_sizes(
         entry = acc.setdefault(
             table_id,
             {"rows": None, "data": None, "index": None, "total": None,
-             "pct": None, "segments": 0, "measured": None},
+             "pct": None, "segments": 0, "retention": None, "measured": None},
         )
         entry["segments"] += 1
         _accumulate(entry, "total", total_mb)
@@ -290,6 +334,10 @@ def _load_table_sizes(
         _accumulate(entry, "pct", to_number(_cell(row, cols.get("percent_of_total"))))
         # Число строк по секциям тоже складывается.
         _accumulate(entry, "rows", to_number(_cell(row, cols.get("row_count"))))
+        # Глубина хранения — свойство таблицы, а не сегмента: берём первое
+        # непустое значение, а не сумму по секциям.
+        if entry["retention"] is None:
+            entry["retention"] = _as_int(to_number(_cell(row, cols.get("retention_days"))))
         if entry["measured"] is None:
             entry["measured"] = clean_text(_cell(row, cols.get("measured_at")))
 
@@ -302,6 +350,7 @@ def _load_table_sizes(
             e["total"],
             e["pct"],
             e["segments"],
+            e["retention"],
             e["measured"],
         )
         for table_id, e in acc.items()
@@ -312,7 +361,7 @@ def _load_table_sizes(
         "fact_table_size",
         rows_out,
         ["table_id", "row_count", "data_mb", "index_mb", "total_mb",
-         "percent_of_total", "segment_count", "measured_at"],
+         "percent_of_total", "segment_count", "retention_days", "measured_at"],
         casts={"measured_at": "TRY_CAST(? AS DATE)"},
     )
     stats.sizes_loaded = len(rows_out)
@@ -460,7 +509,10 @@ def print_summary(stats: LoadStats) -> None:
     print(f"  строк прочитано : {stats.rows_read}")
     print(f"  отчётов загружено: {stats.rows_loaded}")
     print(f"  строк отброшено  : {stats.rows_rejected}")
-    print(f"  уникальных таблиц: {stats.tables}")
+    print(f"  уникальных объектов: {stats.tables}")
+    if stats.objects_by_kind:
+        parts = ", ".join(f"{k}: {v}" for k, v in sorted(stats.objects_by_kind.items()))
+        print(f"     по типам        : {parts}")
     print(f"  связей отчёт↔таблица: {stats.links}")
     if stats.unparsed_refs:
         print(f"  !  ссылок без схемы: {stats.unparsed_refs} (схема = '(unknown)')")

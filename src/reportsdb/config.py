@@ -13,7 +13,7 @@ VERSION = "0.2.0"
 # Версия структуры БД. Поднимать при КАЖДОМ изменении sql/01_schema.sql или
 # sql/02_views.sql. Приложение сравнивает её с версией в файле базы и, если та
 # старее, просит перезагрузить данные вместо падения с ошибкой SQL.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "config" / "mapping.yml"
@@ -35,6 +35,9 @@ class SectionConfig:
     header_row: int = 0
     columns: dict[str, list[str]] = field(default_factory=dict)
     table_separator: str = ";"
+    # Маски имён для распознавания типа объекта: {"VIEW": ["V_*"], ...}.
+    # По умолчанию пусто — тип берётся только из явных колонок файла.
+    object_patterns: dict[str, list[str]] = field(default_factory=dict)
     # Типы сегментов, которые считаются объёмом таблицы (см. mapping.yml).
     segment_types: list[str] = field(default_factory=list)
 
@@ -51,6 +54,10 @@ class SectionConfig:
             header_row=int(raw.get("header_row") or 0),
             columns=columns,
             table_separator=raw.get("table_separator") or ";",
+            object_patterns={
+                str(kind): [str(v) for v in (masks or [])]
+                for kind, masks in (raw.get("object_patterns") or {}).items()
+            },
             segment_types=[str(v) for v in (raw.get("segment_types") or [])],
         )
 

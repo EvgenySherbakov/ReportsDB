@@ -62,20 +62,24 @@ SELECT
     t.full_name,
     t.schema_name,
     t.table_name,
+    t.object_kind,
+    t.kind_source,
     t.is_parsed_ok,
     COUNT(DISTINCT b.report_id)                    AS report_count,
     (COUNT(DISTINCT b.report_id) = 0)              AS is_orphan,
     s.total_mb,
     s.percent_of_total,
     s.segment_count,
+    s.retention_days,
     s.row_count,
     string_agg(DISTINCT r.report_name, '; ')       AS reports
 FROM dim_table t
 LEFT JOIN bridge_report_table b ON b.table_id = t.table_id
 LEFT JOIN dim_report r          ON r.report_id = b.report_id
 LEFT JOIN fact_table_size s     ON s.table_id = t.table_id
-GROUP BY t.table_id, t.full_name, t.schema_name, t.table_name, t.is_parsed_ok,
-         s.total_mb, s.percent_of_total, s.segment_count, s.row_count;
+GROUP BY t.table_id, t.full_name, t.schema_name, t.table_name, t.object_kind,
+         t.kind_source, t.is_parsed_ok, s.total_mb, s.percent_of_total,
+         s.segment_count, s.retention_days, s.row_count;
 
 -- 5.3. Стоимость против ценности -----------------------------------------
 CREATE VIEW v_report_cost_value AS
@@ -263,3 +267,163 @@ JOIN dim_report r1 ON r1.report_id = p.report_id_1
 JOIN dim_report r2 ON r2.report_id = p.report_id_2
 WHERE p.shared_tables::DOUBLE / (c1.n + c2.n - p.shared_tables) >= 0.8
 ORDER BY jaccard DESC, p.shared_tables DESC;
+
+
+-- =========================================================================
+-- 6. Пять основных представлений в разрезе РЦ (завода)
+-- Все витрины несут колонки network и plant: аналитика ведётся по каждому РЦ.
+-- См. docs/TZ.md, раздел 5.6.
+-- =========================================================================
+
+-- 6.1. Таблица №1 — объект и его размер, один к одному ---------------------
+-- Только объекты, которые действительно занимают место: таблицы и
+-- материализованные представления. Одна строка на объект внутри РЦ.
+CREATE VIEW v_rc_tables AS
+SELECT
+    r.network,
+    r.plant,
+    t.full_name,
+    t.schema_name,
+    t.table_name,
+    t.object_kind,
+    t.kind_source,
+    s.total_mb,
+    s.percent_of_total,
+    s.row_count,
+    s.retention_days,
+    s.segment_count,
+    (s.table_id IS NULL)              AS size_unknown,
+    COUNT(DISTINCT r.report_id)       AS report_count
+FROM bridge_report_table b
+JOIN dim_report r           ON r.report_id = b.report_id
+JOIN dim_table  t           ON t.table_id  = b.table_id
+LEFT JOIN fact_table_size s ON s.table_id  = b.table_id
+WHERE t.object_kind IN ('TABLE', 'MATERIALIZED VIEW')
+GROUP BY r.network, r.plant, t.full_name, t.schema_name, t.table_name,
+         t.object_kind, t.kind_source, s.table_id, s.total_mb,
+         s.percent_of_total, s.row_count, s.retention_days, s.segment_count
+ORDER BY r.plant, s.total_mb DESC NULLS LAST;
+
+-- 6.2. Таблица №2 — отчёт и его таблицы, один ко многим --------------------
+-- Только настоящие таблицы: view, материализованные view, временные и
+-- generated-объекты исключены — они не отражают физического хранения.
+CREATE VIEW v_rc_report_tables AS
+SELECT
+    r.network,
+    r.plant,
+    r.report_no,
+    r.report_name,
+    r.catalog_path,
+    t.full_name       AS table_full_name,
+    t.schema_name,
+    t.object_kind,
+    t.kind_source,
+    s.total_mb,
+    s.percent_of_total,
+    s.retention_days
+FROM bridge_report_table b
+JOIN dim_report r           ON r.report_id = b.report_id
+JOIN dim_table  t           ON t.table_id  = b.table_id
+LEFT JOIN fact_table_size s ON s.table_id  = b.table_id
+WHERE t.object_kind = 'TABLE'
+ORDER BY r.plant, r.report_name, t.full_name;
+
+-- 6.3. Таблица №3 — отчёт и его функции и процедуры ------------------------
+CREATE VIEW v_rc_report_routines AS
+SELECT
+    r.network,
+    r.plant,
+    r.report_no,
+    r.report_name,
+    r.catalog_path,
+    t.full_name    AS routine_full_name,
+    t.schema_name,
+    t.table_name   AS routine_name
+FROM bridge_report_table b
+JOIN dim_report r ON r.report_id = b.report_id
+JOIN dim_table  t ON t.table_id  = b.table_id
+WHERE t.object_kind = 'ROUTINE'
+ORDER BY r.plant, r.report_name, t.full_name;
+
+-- 6.4. Таблица №4 — отчёт и обращения пользователей ------------------------
+-- Заказчик считает мерой пользовательской активности «Кол-во обращений».
+-- Если появится отдельная колонка с числом уникальных пользователей, она
+-- подхватится в distinct_users и встанет рядом.
+CREATE VIEW v_rc_report_usage AS
+SELECT
+    r.network,
+    r.plant,
+    r.report_no,
+    r.report_name,
+    r.catalog_path,
+    r.uses_view,
+    u.exec_count,
+    u.distinct_users,
+    u.avg_duration_sec,
+    ROUND(u.exec_count * u.avg_duration_sec, 1) AS total_duration_sec,
+    u.last_executed_at,
+    CASE
+        WHEN u.exec_count IS NULL THEN 'Нет данных'
+        WHEN u.exec_count = 0     THEN 'Не запускался'
+        WHEN u.exec_count < 10    THEN 'До 10 обращений'
+        WHEN u.exec_count < 100   THEN 'От 10 до 100'
+        ELSE                           'Более 100'
+    END AS usage_band
+FROM dim_report r
+LEFT JOIN fact_report_usage u ON u.report_id = r.report_id
+ORDER BY r.plant, u.exec_count DESC NULLS LAST;
+
+-- 6.5. Таблица №5 — отчёт и глубина хранения данных ------------------------
+-- Глубина задана на таблицу. Глубина отчёта — максимум по его таблицам:
+-- отчёт показывает столько дней, сколько хранит самая «долгая» его таблица.
+CREATE VIEW v_rc_report_retention AS
+WITH per_report AS (
+    SELECT
+        b.report_id,
+        MAX(s.retention_days)                                   AS retention_days,
+        MIN(s.retention_days)                                   AS retention_days_min,
+        COUNT(*) FILTER (WHERE s.retention_days IS NOT NULL)    AS tables_with_retention,
+        COUNT(*)                                                AS table_count
+    FROM bridge_report_table b
+    JOIN dim_table t            ON t.table_id = b.table_id
+    LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+    WHERE t.object_kind = 'TABLE'
+    GROUP BY b.report_id
+)
+SELECT
+    r.network,
+    r.plant,
+    r.report_no,
+    r.report_name,
+    r.catalog_path,
+    p.table_count,
+    p.tables_with_retention,
+    p.retention_days,
+    p.retention_days_min,
+    CASE
+        WHEN p.retention_days IS NULL THEN 'Не задана'
+        WHEN p.retention_days <= 30   THEN 'До 30 дней'
+        WHEN p.retention_days <= 45   THEN 'От 31 до 45 дней'
+        ELSE                               'Более 45 дней'
+    END AS retention_band
+FROM dim_report r
+LEFT JOIN per_report p ON p.report_id = r.report_id
+ORDER BY r.plant, p.retention_days DESC NULLS LAST;
+
+-- 6.6. Сводка по РЦ — шапка страницы --------------------------------------
+CREATE VIEW v_rc_summary AS
+SELECT
+    COALESCE(r.network, '(не указана)') AS network,
+    COALESCE(r.plant, '(не указан)')    AS plant,
+    COUNT(DISTINCT r.report_id)         AS report_count,
+    COUNT(DISTINCT b.table_id) FILTER (WHERE t.object_kind = 'TABLE')   AS table_count,
+    COUNT(DISTINCT b.table_id) FILTER (WHERE t.object_kind = 'VIEW')    AS view_count,
+    COUNT(DISTINCT b.table_id) FILTER (WHERE t.object_kind = 'MATERIALIZED VIEW')
+                                                                        AS matview_count,
+    COUNT(DISTINCT b.table_id) FILTER (WHERE t.object_kind = 'TEMP')    AS temp_count,
+    COUNT(DISTINCT b.table_id) FILTER (WHERE t.object_kind = 'ROUTINE') AS routine_count
+FROM dim_report r
+LEFT JOIN bridge_report_table b ON b.report_id = r.report_id
+LEFT JOIN dim_table t           ON t.table_id  = b.table_id
+GROUP BY 1, 2
+ORDER BY report_count DESC;

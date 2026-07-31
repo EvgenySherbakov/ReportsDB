@@ -1,6 +1,12 @@
 -- Схема БД отчётности SSRS. См. docs/TZ.md, раздел 4.
 -- Скрипт выполняется на чистой БД (ETL пересоздаёт файл), но написан идемпотентно.
 
+DROP VIEW IF EXISTS v_rc_summary;
+DROP VIEW IF EXISTS v_rc_report_retention;
+DROP VIEW IF EXISTS v_rc_report_usage;
+DROP VIEW IF EXISTS v_rc_report_routines;
+DROP VIEW IF EXISTS v_rc_report_tables;
+DROP VIEW IF EXISTS v_rc_tables;
 DROP VIEW IF EXISTS v_report_overlap;
 DROP VIEW IF EXISTS v_report_duration;
 DROP VIEW IF EXISTS v_network_overview;
@@ -47,12 +53,20 @@ CREATE TABLE dim_report (
     UNIQUE (network, plant, catalog_path, report_name)
 );
 
--- Таблицы-источники -------------------------------------------------------
+-- Объекты-источники -------------------------------------------------------
+-- Хранит не только таблицы: сюда же попадают view, материализованные view,
+-- временные таблицы, функции и процедуры. Различает их object_kind.
 CREATE TABLE dim_table (
     table_id     INTEGER PRIMARY KEY,
     schema_name  VARCHAR NOT NULL,
     table_name   VARCHAR NOT NULL,
     full_name    VARCHAR NOT NULL UNIQUE,
+    -- TABLE | VIEW | MATERIALIZED VIEW | TEMP | ROUTINE
+    object_kind  VARCHAR NOT NULL DEFAULT 'TABLE',
+    -- Откуда известен тип: «колонка» (объект пришёл из отдельной колонки),
+    -- «маска» (распознан по имени), «по умолчанию» (не определён, считаем
+    -- таблицей). Нужен, чтобы не выдавать догадку за факт.
+    kind_source  VARCHAR NOT NULL DEFAULT 'по умолчанию',
     is_parsed_ok BOOLEAN NOT NULL DEFAULT TRUE
 );
 
@@ -75,6 +89,8 @@ CREATE TABLE fact_table_size (
     percent_of_total DOUBLE,
     -- Сколько строк выгрузки сегментов сложилось в эту таблицу (секции и т.п.).
     segment_count INTEGER,
+    -- Глубина хранения данных в таблице, дней.
+    retention_days INTEGER,
     measured_at DATE
 );
 

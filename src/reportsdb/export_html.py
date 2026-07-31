@@ -29,7 +29,8 @@ QUERIES = {
         ORDER BY f.exclusive_mb DESC
     """,
     "tables": """
-        SELECT full_name, schema_name, report_count, is_orphan, total_mb, row_count
+        SELECT full_name, schema_name, object_kind, report_count, is_orphan,
+               total_mb, percent_of_total, retention_days, row_count
         FROM v_table_criticality
         ORDER BY report_count DESC, total_mb DESC NULLS LAST
     """,
@@ -48,6 +49,14 @@ QUERIES = {
         WHERE avg_duration_sec IS NOT NULL
         LIMIT 500
     """,
+    "retention": """
+        SELECT report_no, report_name, COALESCE(network, '—') AS network,
+               COALESCE(plant, '—') AS plant, catalog_path, table_count,
+               retention_days, retention_band
+        FROM v_rc_report_retention
+        LIMIT 500
+    """,
+    "rc": "SELECT * FROM v_rc_summary",
     "catalog": "SELECT * FROM v_catalog_overview",
     "networks": "SELECT * FROM v_network_overview",
 }

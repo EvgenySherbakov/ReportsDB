@@ -41,6 +41,12 @@ VIEWS = [
     "v_network_overview",
     "v_report_duration",
     "v_report_overlap",
+    "v_rc_tables",
+    "v_rc_report_tables",
+    "v_rc_report_routines",
+    "v_rc_report_usage",
+    "v_rc_report_retention",
+    "v_rc_summary",
 ]
 
 # Каждое поле, приходящее из исходных файлов, обязано быть видно в аналитике —
@@ -51,6 +57,7 @@ FIELDS_IN_ANALYTICS = [
     "exec_count", "avg_duration_sec", "total_duration_sec",
     "percent_of_total", "exclusive_pct_of_db", "segment_count",
     "total_mb", "schema_name", "table_name",
+    "object_kind", "kind_source", "retention_days", "retention_band", "usage_band",
 ]
 
 
@@ -311,8 +318,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 3.
-    expected = "619127"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 4.
+    expected = "e8e369"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -435,6 +442,103 @@ def test_total_duration_is_execs_times_average(full_db):
         """
     ).fetchone()[0]
     assert mismatch == 0
+
+
+# --- Пять основных представлений в разрезе РЦ ----------------------------
+
+def test_rc_tables_are_one_to_one_per_rc(full_db):
+    """Таблица №1 — строго один объект на РЦ.
+
+    РЦ определяется парой «сеть + завод»: одно имя завода встречается в разных
+    сетях и означает разные площадки.
+    """
+    dupes = full_db.execute(
+        "SELECT COUNT(*) FROM (SELECT network, plant, full_name FROM v_rc_tables "
+        "GROUP BY 1, 2, 3 HAVING COUNT(*) > 1)"
+    ).fetchone()[0]
+    assert dupes == 0
+
+
+def test_rc_tables_exclude_views_and_routines(full_db):
+    """В №1 попадает только то, что занимает место."""
+    kinds = {
+        row[0] for row in full_db.execute(
+            "SELECT DISTINCT object_kind FROM v_rc_tables"
+        ).fetchall()
+    }
+    assert kinds <= {"TABLE", "MATERIALIZED VIEW"}, f"лишние типы: {kinds}"
+
+
+def test_rc_report_tables_contain_only_real_tables(full_db):
+    """Таблица №2 — без view, mat.view, временных и процедур."""
+    kinds = {
+        row[0] for row in full_db.execute(
+            "SELECT DISTINCT object_kind FROM v_rc_report_tables"
+        ).fetchall()
+    }
+    assert kinds == {"TABLE"}, f"в таблицу №2 просочились: {kinds - {'TABLE'}}"
+
+
+def test_rc_report_tables_is_one_to_many(full_db):
+    """У отчёта несколько таблиц — связь не схлопнута в одну строку."""
+    max_tables = full_db.execute(
+        "SELECT MAX(n) FROM (SELECT COUNT(*) AS n FROM v_rc_report_tables "
+        "GROUP BY network, plant, report_name)"
+    ).fetchone()[0]
+    assert max_tables > 1
+
+
+def test_rc_routines_contain_only_routines(full_db):
+    """Таблица №3 — только функции и процедуры."""
+    kinds = {
+        row[0] for row in full_db.execute(
+            "SELECT DISTINCT t.object_kind FROM v_rc_report_routines v "
+            "JOIN dim_table t ON t.full_name = v.routine_full_name"
+        ).fetchall()
+    }
+    assert kinds == {"ROUTINE"}
+
+
+def test_rc_usage_covers_every_report(full_db):
+    """Таблица №4 — строка на каждый отчёт, даже без статистики."""
+    reports = full_db.execute("SELECT COUNT(*) FROM dim_report").fetchone()[0]
+    rows = full_db.execute("SELECT COUNT(*) FROM v_rc_report_usage").fetchone()[0]
+    assert rows == reports
+
+
+def test_rc_retention_bands_match_days(full_db):
+    """Границы 30/45 расставлены ровно так, как просил заказчик."""
+    bad = full_db.execute(
+        """
+        SELECT COUNT(*) FROM v_rc_report_retention
+        WHERE (retention_days <= 30 AND retention_band <> 'До 30 дней')
+           OR (retention_days > 30 AND retention_days <= 45
+               AND retention_band <> 'От 31 до 45 дней')
+           OR (retention_days > 45 AND retention_band <> 'Более 45 дней')
+           OR (retention_days IS NULL AND retention_band <> 'Не задана')
+        """
+    ).fetchone()[0]
+    assert bad == 0
+
+
+def test_object_kinds_are_loaded_from_columns(full_db):
+    """Типы объектов приходят из отдельных колонок, а не угадываются."""
+    rows = dict(full_db.execute(
+        "SELECT object_kind, COUNT(*) FROM dim_table GROUP BY 1"
+    ).fetchall())
+    for kind in ("TABLE", "VIEW", "MATERIALIZED VIEW", "TEMP", "ROUTINE"):
+        assert rows.get(kind, 0) > 0, f"нет объектов типа {kind}"
+
+    guessed = full_db.execute(
+        "SELECT COUNT(*) FROM dim_table WHERE object_kind <> 'TABLE' "
+        "AND kind_source <> 'колонка'"
+    ).fetchone()[0]
+    assert guessed == 0, "тип, отличный от таблицы, должен приходить из колонки"
+
+
+def test_object_kind_masks_are_off_by_default():
+    """Маски имён по умолчанию пусты: угаданный тип молча выкинул бы таблицу."""
+    assert load_mapping().reports.object_patterns == {}
 
 
 # --- Витрины на пустых фактах --------------------------------------------

@@ -171,6 +171,19 @@
 </section>
 
 <section>
+  <h2>Глубина хранения данных</h2>
+  <p class="hint">Глубина задана на таблицу; у отчёта берётся максимум по его
+  таблицам. Отчёты с глубиной более 45 дней — первые кандидаты на сокращение
+  срока хранения.</p>
+  <div class="controls">
+    <input type="search" id="q-retention" placeholder="Поиск…">
+    <select id="f-retention"></select>
+    <button class="csv" data-csv="retention">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-retention"></table></div>
+</section>
+
+<section>
   <h2>Время выполнения</h2>
   <p class="hint">Вторая, независимая от объёма метрика стоимости: суммарное
   время — это число обращений, умноженное на среднюю длительность выборки.</p>
@@ -348,6 +361,16 @@ const CANDIDATE_COLS = [
   {key: 'exec_count', label: 'Запусков', num: true},
   {key: 'confidence', label: 'Уверенность'},
 ];
+const RETENTION_COLS = [
+  {key: 'report_no', label: '№'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'catalog_path', label: 'Каталог'},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'retention_days', label: 'Глубина, дней', num: true, sort: true},
+  {key: 'retention_band', label: 'Группа по глубине'},
+];
 const DURATION_COLS = [
   {key: 'report_no', label: '№'},
   {key: 'report_name', label: 'Отчёт', wide: true},
@@ -362,6 +385,8 @@ const DURATION_COLS = [
 const TABLE_COLS = [
   {key: 'full_name', label: 'Таблица', wide: true},
   {key: 'schema_name', label: 'Схема'},
+  {key: 'object_kind', label: 'Тип объекта'},
+  {key: 'retention_days', label: 'Глубина, дней', num: true},
   {key: 'report_count', label: 'Отчётов', num: true, sort: true},
   {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1},
   {key: 'row_count', label: 'Строк', num: true},
@@ -381,6 +406,12 @@ const getters = {
     filter: document.getElementById('f-confidence'),
     filterField: 'confidence', filterLabel: 'Любая уверенность',
   }),
+  retention: makeTable({
+    el: 't-retention', rows: DATA.retention, cols: RETENTION_COLS,
+    search: document.getElementById('q-retention'),
+    filter: document.getElementById('f-retention'),
+    filterField: 'retention_band', filterLabel: 'Любая глубина',
+  }),
   durations: makeTable({
     el: 't-durations', rows: DATA.durations, cols: DURATION_COLS,
     search: document.getElementById('q-durations'),
@@ -396,7 +427,8 @@ const getters = {
 };
 
 const COLS = {reports: REPORT_COLS, candidates: CANDIDATE_COLS,
-              durations: DURATION_COLS, tables: TABLE_COLS};
+              durations: DURATION_COLS, retention: RETENTION_COLS,
+              tables: TABLE_COLS};
 
 /* --- Выгрузка текущей выборки в CSV ------------------------------------- */
 document.querySelectorAll('button.csv').forEach(btn => {

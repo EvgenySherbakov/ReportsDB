@@ -60,6 +60,14 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
         }
     )
 
+    # View, материализованные view, временные объекты и процедуры — отдельными
+    # списками, как в файле заказчика.
+    views = [f"{s}.V_{e.upper()}" for s in SCHEMAS[:3] for e in ENTITIES[:6]]
+    matviews = [f"{s}.MV_{e.upper()}" for s in SCHEMAS[:2] for e in ENTITIES[:4]]
+    temps = [f"{s}.TMP_{e.upper()}" for s in SCHEMAS[:2] for e in ENTITIES[:5]]
+    routines = [f"{s}.PRC_{e.upper()}" for s in SCHEMAS[:2] for e in ENTITIES[:6]]
+    routines += [f"{s}.FN_{e.upper()}" for s in SCHEMAS[:2] for e in ENTITIES[6:10]]
+
     # Ядро часто переиспользуемых таблиц — создаёт реалистичное перекрытие.
     core = rnd.sample(all_tables, 8)
     # «Длинный хвост»: таблицы, к которым тянется ровно один отчёт.
@@ -100,6 +108,10 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
                 "Наименование отчета": name,
                 "Используется view": rnd.choice(["да", "нет", "нет", "нет"]),
                 "Таблицы источники данных": ";".join(picked),
+                "View": ";".join(rnd.sample(views, rnd.randint(0, 2))),
+                "Mat.view": ";".join(rnd.sample(matviews, rnd.randint(0, 1))),
+                "Временные таблицы": ";".join(rnd.sample(temps, rnd.randint(0, 2))),
+                "Функции/процедуры": ";".join(rnd.sample(routines, rnd.randint(0, 3))),
                 "Ср. дл. (сек)": round(rnd.lognormvariate(1.6, 1.2), 1),
                 "Кол-во обращений": execs,
             }
@@ -124,6 +136,8 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
         if rnd.random() < 0.12:
             continue
         owner, table_name = t.split(".", 1)
+        # Глубина хранения: чаще 30 и 45 дней, у части таблиц — заметно больше.
+        retention = rnd.choice([30, 30, 30, 45, 45, 60, 90, 180, 365])
         parts = 1 if rnd.random() < 0.85 else rnd.randint(2, 4)
         for part in range(parts):
             size_mb = round(rnd.lognormvariate(3.0, 1.6), 2)
@@ -135,6 +149,7 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
                     "SIZE_MB": size_mb,
                     "PERCENT_OF_TOTAL": None,
                     "PERCENT_OF_SCHEMA": None,
+                    "Глубина хранения": retention,
                 }
             )
         # Индексный сегмент: имя своё, к таблице по выгрузке не привязывается.
@@ -147,6 +162,7 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
                     "SIZE_MB": round(rnd.lognormvariate(2.0, 1.2), 2),
                     "PERCENT_OF_TOTAL": None,
                     "PERCENT_OF_SCHEMA": None,
+                    "Глубина хранения": retention,
                 }
             )
 
@@ -156,7 +172,7 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
         seg["PERCENT_OF_TOTAL"] = round(100.0 * seg["SIZE_MB"] / total, 4)
         seg["PERCENT_OF_SCHEMA"] = None
     order = ["№", "OWNER", "SEGMENT_NAME", "SEGMENT_TYPE", "SIZE_MB",
-             "PERCENT_OF_TOTAL", "PERCENT_OF_SCHEMA"]
+             "PERCENT_OF_TOTAL", "PERCENT_OF_SCHEMA", "Глубина хранения"]
     sizes_path = RAW_DIR / "sample_table_sizes.xlsx"
     pd.DataFrame(segments)[order].to_excel(sizes_path, index=False)
 
