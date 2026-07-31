@@ -70,6 +70,10 @@ SIZE_FIELDS = [
      "Без него индексы и LOB попадут в размер таблиц и завысят его"),
     ("percent_of_total", "PERCENT_OF_TOTAL — доля в БД", "Полезное",
      "Не показать долю отчёта в общем объёме базы"),
+    ("network", "ТС", "Разрез по заводам",
+     "Размеры будут общими для всех заводов, а не своими на каждом"),
+    ("plant", "Завод", "Разрез по заводам",
+     "Размеры будут общими для всех заводов, а не своими на каждом"),
     ("retention_days", "Глубина хранения, дней", "Полезное",
      "Таблица №5 «Отчёт → глубина хранения» останется пустой"),
     ("full_name", "Схема.таблица одной колонкой", "Запасной вариант",
@@ -375,7 +379,7 @@ if st.button("Загрузить", type="primary", use_container_width=True):
     m2.metric("Отчётов загружено", stats.rows_loaded)
     m3.metric("Уникальных объектов", stats.tables)
     m4.metric("Связей", stats.links)
-    m5.metric("Размеров таблиц", stats.sizes_loaded)
+    m5.metric("Строк размеров", stats.sizes_loaded)
 
     if stats.objects_by_kind:
         st.caption(
@@ -396,12 +400,14 @@ if st.button("Загрузить", type="primary", use_container_width=True):
             "(индексы, LOB). Так и задумано: привязать их к таблице по выгрузке "
             "нельзя, поэтому в объём таблиц они не входят."
         )
-    if stats.sizes_unmatched:
-        st.warning(
-            f"Размеры для {len(stats.sizes_unmatched)} таблиц не сопоставились с "
-            "отчётами — таких таблиц нет ни в одном отчёте. "
-            f"Например: {', '.join(stats.sizes_unmatched[:5])}"
+    if stats.tables_only_in_sizes:
+        st.info(
+            f"{stats.tables_only_in_sizes} таблиц есть только в файле размеров и "
+            "не используются ни одним отчётом. Они загружены и видны в таблице "
+            "№1 — список таблиц не зависит от отчётов."
         )
+    if stats.size_plants > 1:
+        st.caption(f"В файле размеров различается {stats.size_plants} пар «сеть + завод».")
     if stats.usage_unmatched:
         st.warning(
             f"Статистика по {len(stats.usage_unmatched)} отчётам не сопоставилась "

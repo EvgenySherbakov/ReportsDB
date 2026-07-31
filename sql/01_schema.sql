@@ -1,13 +1,13 @@
 -- Схема БД отчётности SSRS. См. docs/TZ.md, раздел 4.
 -- Скрипт выполняется на чистой БД (ETL пересоздаёт файл), но написан идемпотентно.
 
+DROP VIEW IF EXISTS v_tables_catalog;
 DROP VIEW IF EXISTS v_report_tables_summary;
 DROP VIEW IF EXISTS v_rc_summary;
 DROP VIEW IF EXISTS v_rc_report_retention;
 DROP VIEW IF EXISTS v_rc_report_usage;
 DROP VIEW IF EXISTS v_rc_report_routines;
 DROP VIEW IF EXISTS v_rc_report_tables;
-DROP VIEW IF EXISTS v_rc_tables;
 DROP VIEW IF EXISTS v_report_overlap;
 DROP VIEW IF EXISTS v_report_duration;
 DROP VIEW IF EXISTS v_network_overview;
@@ -17,6 +17,7 @@ DROP VIEW IF EXISTS v_decommission_candidates;
 DROP VIEW IF EXISTS v_report_cost_value;
 DROP VIEW IF EXISTS v_table_criticality;
 DROP VIEW IF EXISTS v_report_footprint;
+DROP VIEW IF EXISTS v_report_table_size;
 
 DROP TABLE IF EXISTS etl_reject;
 DROP TABLE IF EXISTS etl_run;
@@ -78,9 +79,17 @@ CREATE TABLE bridge_report_table (
     PRIMARY KEY (report_id, table_id)
 );
 
--- Размеры таблиц (заполняется, когда появятся данные) ----------------------
+-- Размеры таблиц ----------------------------------------------------------
+-- Хранит ВСЕ строки файла размеров, а не только таблицы из отчётов: список
+-- таблиц существует сам по себе и не зависит от того, ссылается ли на них
+-- хоть один отчёт.
+-- Ключ включает завод: одна и та же таблица на разных заводах имеет разный
+-- размер. Если в файле нет колонок ТС и Завод, строки складываются в
+-- «(не указана)» / «(не указан)» и применяются ко всем отчётам.
 CREATE TABLE fact_table_size (
-    table_id    INTEGER PRIMARY KEY,
+    table_id    INTEGER NOT NULL,
+    network     VARCHAR NOT NULL DEFAULT '(не указана)',
+    plant       VARCHAR NOT NULL DEFAULT '(не указан)',
     row_count   BIGINT,
     data_mb     DOUBLE,
     index_mb    DOUBLE,
@@ -92,7 +101,8 @@ CREATE TABLE fact_table_size (
     segment_count INTEGER,
     -- Глубина хранения данных в таблице, дней.
     retention_days INTEGER,
-    measured_at DATE
+    measured_at DATE,
+    PRIMARY KEY (table_id, network, plant)
 );
 
 -- Использование отчётов ---------------------------------------------------

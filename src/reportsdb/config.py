@@ -13,7 +13,7 @@ VERSION = "0.2.0"
 # Версия структуры БД. Поднимать при КАЖДОМ изменении sql/01_schema.sql или
 # sql/02_views.sql. Приложение сравнивает её с версией в файле базы и, если та
 # старее, просит перезагрузить данные вместо падения с ошибкой SQL.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "config" / "mapping.yml"

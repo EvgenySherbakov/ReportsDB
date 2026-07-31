@@ -1,6 +1,35 @@
 -- Аналитические витрины. См. docs/TZ.md, раздел 5.
 -- Все витрины обязаны работать при пустых fact_table_size / fact_report_usage.
 
+-- 0. Размер таблицы, применимый к конкретному отчёту -----------------------
+-- Размер хранится на пару «таблица + завод», а отчёт тоже привязан к заводу.
+-- Эта витрина выбирает правильную строку размера: сначала точное совпадение
+-- по заводу отчёта, иначе — общая строка «(не указан)» для файлов без ТС и
+-- Завода. Все витрины со стороны отчётов обязаны ходить сюда, а НЕ напрямую
+-- в fact_table_size: прямое соединение по table_id размножило бы строки по
+-- числу заводов и завысило суммы в разы.
+CREATE VIEW v_report_table_size AS
+SELECT
+    b.report_id,
+    b.table_id,
+    COALESCE(exact.total_mb,         common.total_mb)         AS total_mb,
+    COALESCE(exact.percent_of_total, common.percent_of_total) AS percent_of_total,
+    COALESCE(exact.row_count,        common.row_count)        AS row_count,
+    COALESCE(exact.retention_days,   common.retention_days)   AS retention_days,
+    COALESCE(exact.segment_count,    common.segment_count)    AS segment_count,
+    (exact.table_id IS NOT NULL OR common.table_id IS NOT NULL) AS has_size,
+    (exact.table_id IS NOT NULL)                                AS size_is_plant_specific
+FROM bridge_report_table b
+JOIN dim_report r ON r.report_id = b.report_id
+LEFT JOIN fact_table_size exact
+       ON exact.table_id = b.table_id
+      AND exact.network  = COALESCE(r.network, '(не указана)')
+      AND exact.plant    = COALESCE(r.plant, '(не указан)')
+LEFT JOIN fact_table_size common
+       ON common.table_id = b.table_id
+      AND common.network  = '(не указана)'
+      AND common.plant    = '(не указан)';
+
 -- 5.1. Объём данных на отчёт ---------------------------------------------
 -- ВНИМАНИЕ: gross_mb суммирует общие таблицы повторно в разных отчётах.
 -- Суммировать gross_mb по всем отчётам НЕЛЬЗЯ — это не объём хранилища.
@@ -22,7 +51,7 @@ joined AS (
         (s.table_id IS NOT NULL) AS has_size
     FROM bridge_report_table b
     JOIN tbl_usage u ON u.table_id = b.table_id
-    LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+    LEFT JOIN v_report_table_size s ON s.table_id = b.table_id AND s.report_id = b.report_id
 )
 SELECT
     r.report_id,
@@ -67,19 +96,31 @@ SELECT
     t.is_parsed_ok,
     COUNT(DISTINCT b.report_id)                    AS report_count,
     (COUNT(DISTINCT b.report_id) = 0)              AS is_orphan,
-    s.total_mb,
-    s.percent_of_total,
-    s.segment_count,
-    s.retention_days,
-    s.row_count,
+    sz.total_mb,
+    sz.percent_of_total,
+    sz.segment_count,
+    sz.retention_days,
+    sz.row_count,
+    sz.plant_count,
     string_agg(DISTINCT r.report_name, '; ')       AS reports
 FROM dim_table t
 LEFT JOIN bridge_report_table b ON b.table_id = t.table_id
 LEFT JOIN dim_report r          ON r.report_id = b.report_id
-LEFT JOIN fact_table_size s     ON s.table_id = t.table_id
+-- Размер таблицы складывается по всем заводам: на каждом она занимает своё
+-- место. Соединение уже свёрнуто, поэтому строки не размножаются.
+LEFT JOIN (
+    SELECT table_id,
+           ROUND(SUM(total_mb), 2)         AS total_mb,
+           ROUND(SUM(percent_of_total), 3) AS percent_of_total,
+           SUM(segment_count)              AS segment_count,
+           MAX(retention_days)             AS retention_days,
+           SUM(row_count)                  AS row_count,
+           COUNT(*)                        AS plant_count
+    FROM fact_table_size GROUP BY table_id
+) sz ON sz.table_id = t.table_id
 GROUP BY t.table_id, t.full_name, t.schema_name, t.table_name, t.object_kind,
-         t.kind_source, t.is_parsed_ok, s.total_mb, s.percent_of_total,
-         s.segment_count, s.retention_days, s.row_count;
+         t.kind_source, t.is_parsed_ok, sz.total_mb, sz.percent_of_total,
+         sz.segment_count, sz.retention_days, sz.row_count, sz.plant_count;
 
 -- 5.3. Стоимость против ценности -----------------------------------------
 CREATE VIEW v_report_cost_value AS
@@ -275,13 +316,16 @@ ORDER BY jaccard DESC, p.shared_tables DESC;
 -- См. docs/TZ.md, раздел 5.6.
 -- =========================================================================
 
--- 6.1. Таблица №1 — объект и его размер, один к одному ---------------------
--- Только объекты, которые действительно занимают место: таблицы и
--- материализованные представления. Одна строка на объект внутри РЦ.
-CREATE VIEW v_rc_tables AS
+-- 6.1. Таблица №1 — все таблицы и их размеры ------------------------------
+-- ПОЛНЫЙ список из файла размеров: строка на пару «таблица + завод».
+-- Витрина НЕ зависит от отчётов — таблица попадает сюда, даже если на неё не
+-- ссылается ни один отчёт. Колонка report_count добавлена справочно.
+-- Замыкающая часть UNION добавляет объекты, которые есть в отчётах, но
+-- отсутствуют в файле размеров: иначе они пропали бы из списка совсем.
+CREATE VIEW v_tables_catalog AS
 SELECT
-    r.network,
-    r.plant,
+    s.network,
+    s.plant,
     t.full_name,
     t.schema_name,
     t.table_name,
@@ -292,17 +336,29 @@ SELECT
     s.row_count,
     s.retention_days,
     s.segment_count,
-    (s.table_id IS NULL)              AS size_unknown,
-    COUNT(DISTINCT r.report_id)       AS report_count
-FROM bridge_report_table b
-JOIN dim_report r           ON r.report_id = b.report_id
-JOIN dim_table  t           ON t.table_id  = b.table_id
-LEFT JOIN fact_table_size s ON s.table_id  = b.table_id
-WHERE t.object_kind IN ('TABLE', 'MATERIALIZED VIEW')
-GROUP BY r.network, r.plant, t.full_name, t.schema_name, t.table_name,
-         t.object_kind, t.kind_source, s.table_id, s.total_mb,
-         s.percent_of_total, s.row_count, s.retention_days, s.segment_count
-ORDER BY r.plant, s.total_mb DESC NULLS LAST;
+    s.measured_at,
+    FALSE AS size_unknown,
+    (SELECT COUNT(DISTINCT b.report_id) FROM bridge_report_table b
+     WHERE b.table_id = t.table_id) AS report_count
+FROM fact_table_size s
+JOIN dim_table t ON t.table_id = s.table_id
+
+UNION ALL
+
+SELECT
+    '(нет в файле размеров)' AS network,
+    '(нет в файле размеров)' AS plant,
+    t.full_name,
+    t.schema_name,
+    t.table_name,
+    t.object_kind,
+    t.kind_source,
+    NULL, NULL, NULL, NULL, NULL, NULL,
+    TRUE AS size_unknown,
+    (SELECT COUNT(DISTINCT b.report_id) FROM bridge_report_table b
+     WHERE b.table_id = t.table_id) AS report_count
+FROM dim_table t
+WHERE NOT EXISTS (SELECT 1 FROM fact_table_size s WHERE s.table_id = t.table_id);
 
 -- 6.2. Таблица №2 — отчёт и его таблицы, один ко многим --------------------
 -- Только настоящие таблицы: view, материализованные view, временные и
@@ -324,7 +380,7 @@ SELECT
 FROM bridge_report_table b
 JOIN dim_report r           ON r.report_id = b.report_id
 JOIN dim_table  t           ON t.table_id  = b.table_id
-LEFT JOIN fact_table_size s ON s.table_id  = b.table_id
+LEFT JOIN v_report_table_size s ON s.table_id = b.table_id AND s.report_id = b.report_id
 WHERE t.object_kind = 'TABLE'
 ORDER BY r.plant, r.report_name, t.full_name;
 
@@ -386,7 +442,7 @@ WITH per_report AS (
         COUNT(*)                                                AS table_count
     FROM bridge_report_table b
     JOIN dim_table t            ON t.table_id = b.table_id
-    LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+    LEFT JOIN v_report_table_size s ON s.table_id = b.table_id AND s.report_id = b.report_id
     WHERE t.object_kind = 'TABLE'
     GROUP BY b.report_id
 )
@@ -445,7 +501,7 @@ WITH tbl AS (
          FROM bridge_report_table x WHERE x.table_id = t.table_id) AS used_by_reports
     FROM bridge_report_table b
     JOIN dim_table t            ON t.table_id = b.table_id
-    LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+    LEFT JOIN v_report_table_size s ON s.table_id = b.table_id AND s.report_id = b.report_id
     WHERE t.object_kind = 'TABLE'
 ),
 agg AS (

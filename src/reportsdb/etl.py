@@ -31,6 +31,7 @@ from .normalize import (
     normalise_catalog_path,
     parse_bool,
     parse_table_list,
+    parse_table_ref,
     split_folders,
     to_number,
 )
@@ -61,7 +62,8 @@ class LoadStats:
     segments_skipped: int = 0
     objects_by_kind: dict[str, int] = field(default_factory=dict)
     sizes_loaded: int = 0
-    sizes_unmatched: list[str] = field(default_factory=list)
+    tables_only_in_sizes: int = 0
+    size_plants: int = 0
     usage_loaded: int = 0
     usage_unmatched: list[str] = field(default_factory=list)
 
@@ -278,22 +280,33 @@ def _load_reports(
 def _load_table_sizes(
     con: duckdb.DuckDBPyConnection, section: SectionConfig, stats: LoadStats
 ) -> None:
+    """Загружает ВСЕ строки файла размеров.
+
+    Список таблиц существует сам по себе и не зависит от отчётов: таблица,
+    на которую не ссылается ни один отчёт, всё равно попадает в базу. Объекты,
+    которых нет в отчётах, заводятся здесь же.
+
+    Ключ размера — «таблица + сеть + завод»: одна и та же таблица на разных
+    заводах занимает разное место.
+    """
     path = _section_file(section)
     if path is None:
         return
 
     df = read_sheet(path, section)
     cols = resolve_columns(list(df.columns), section.columns)
+
     known = {
         key: tid
         for tid, key in con.execute("SELECT table_id, full_name FROM dim_table").fetchall()
     }
+    next_id = (con.execute("SELECT COALESCE(MAX(table_id), 0) FROM dim_table").fetchone()[0]) + 1
+    new_objects: list[tuple] = []
 
     # У одной таблицы в выгрузке сегментов может быть несколько строк (секции),
     # поэтому размеры накапливаются, а не перезаписываются.
     allowed = {t.strip().upper() for t in section.segment_types}
-    acc: dict[int, dict] = {}
-    unmatched: set[str] = set()
+    acc: dict[tuple[int, str, str], dict] = {}
 
     for _, row in df.iterrows():
         segment_type = clean_text(_cell(row, cols.get("segment_type")))
@@ -303,18 +316,33 @@ def _load_table_sizes(
                 continue
 
         full = clean_text(_cell(row, cols.get("full_name")))
+        schema_name = clean_text(_cell(row, cols.get("schema_name")))
+        table_name = clean_text(_cell(row, cols.get("table_name")))
         if full is None:
-            schema_name = clean_text(_cell(row, cols.get("schema_name")))
-            table_name = clean_text(_cell(row, cols.get("table_name")))
             if not table_name:
                 continue
             full = f"{schema_name}.{table_name}" if schema_name else table_name
 
-        key = full.replace("[", "").replace("]", "").strip().lower()
+        parsed = parse_table_ref(full)
+        if parsed is None:
+            continue
+        obj_schema, obj_name, parsed_ok = parsed
+        key = full_name_key(obj_schema, obj_name)
+
         table_id = known.get(key)
         if table_id is None:
-            unmatched.add(full)
-            continue
+            # Таблицы нет ни в одном отчёте — заводим её: список таблиц
+            # самостоятелен и не должен зависеть от отчётов.
+            table_id = next_id
+            next_id += 1
+            known[key] = table_id
+            new_objects.append(
+                (table_id, obj_schema, obj_name, key, "TABLE", "файл размеров", parsed_ok)
+            )
+            stats.tables_only_in_sizes += 1
+
+        network = clean_text(_cell(row, cols.get("network"))) or "(не указана)"
+        plant = clean_text(_cell(row, cols.get("plant"))) or "(не указан)"
 
         data_mb = to_number(_cell(row, cols.get("data_mb")))
         index_mb = to_number(_cell(row, cols.get("index_mb")))
@@ -323,7 +351,7 @@ def _load_table_sizes(
             total_mb = (data_mb or 0.0) + (index_mb or 0.0)
 
         entry = acc.setdefault(
-            table_id,
+            (table_id, network, plant),
             {"rows": None, "data": None, "index": None, "total": None,
              "pct": None, "segments": 0, "retention": None, "measured": None},
         )
@@ -341,9 +369,19 @@ def _load_table_sizes(
         if entry["measured"] is None:
             entry["measured"] = clean_text(_cell(row, cols.get("measured_at")))
 
+    _insert(
+        con,
+        "dim_table",
+        new_objects,
+        ["table_id", "schema_name", "table_name", "full_name", "object_kind",
+         "kind_source", "is_parsed_ok"],
+    )
+
     rows_out = [
         (
             table_id,
+            network,
+            plant,
             _as_int(e["rows"]),
             e["data"],
             e["index"],
@@ -353,19 +391,21 @@ def _load_table_sizes(
             e["retention"],
             e["measured"],
         )
-        for table_id, e in acc.items()
+        for (table_id, network, plant), e in acc.items()
     ]
 
     _insert(
         con,
         "fact_table_size",
         rows_out,
-        ["table_id", "row_count", "data_mb", "index_mb", "total_mb",
-         "percent_of_total", "segment_count", "retention_days", "measured_at"],
+        ["table_id", "network", "plant", "row_count", "data_mb", "index_mb",
+         "total_mb", "percent_of_total", "segment_count", "retention_days",
+         "measured_at"],
         casts={"measured_at": "TRY_CAST(? AS DATE)"},
     )
     stats.sizes_loaded = len(rows_out)
-    stats.sizes_unmatched = sorted(unmatched)
+    stats.size_plants = len({(n, p) for _, n, p in acc})
+    stats.tables = con.execute("SELECT COUNT(*) FROM dim_table").fetchone()[0]
 
 
 def _accumulate(entry: dict, key: str, value: float | None) -> None:
@@ -516,13 +556,14 @@ def print_summary(stats: LoadStats) -> None:
     print(f"  связей отчёт↔таблица: {stats.links}")
     if stats.unparsed_refs:
         print(f"  !  ссылок без схемы: {stats.unparsed_refs} (схема = '(unknown)')")
-    if stats.sizes_loaded or stats.sizes_unmatched:
-        print(f"  размеров таблиц  : {stats.sizes_loaded}")
+    if stats.sizes_loaded:
+        print(f"  строк размеров   : {stats.sizes_loaded}")
+        if stats.size_plants > 1:
+            print(f"     заводов в файле размеров: {stats.size_plants}")
+        if stats.tables_only_in_sizes:
+            print(f"     таблиц только в файле размеров: {stats.tables_only_in_sizes}")
         if stats.segments_skipped:
             print(f"     пропущено сегментов не-табличных типов: {stats.segments_skipped}")
-        if stats.sizes_unmatched:
-            preview = ", ".join(stats.sizes_unmatched[:5])
-            print(f"  !  размеры без совпадения: {len(stats.sizes_unmatched)} ({preview}…)")
     if stats.usage_loaded or stats.usage_unmatched:
         print(f"  строк использования: {stats.usage_loaded}")
         if stats.usage_unmatched:

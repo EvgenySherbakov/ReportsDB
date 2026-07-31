@@ -22,8 +22,16 @@ FOLDER_LEVELS = [
     ("Персонал", "", ""),
 ]
 
-NETWORKS = ["СЕТЬ-А", "СЕТЬ-Б", "СЕТЬ-В"]
-PLANTS = ["Завод 1", "Завод 2", "Завод 3", "Завод 4"]
+# Завод принадлежит ровно одной торговой сети — как в жизни. Случайная пара
+# «сеть + завод» ломала бы сопоставление размеров с отчётами.
+PLANT_NETWORK = {
+    "Завод 1": "СЕТЬ-А",
+    "Завод 2": "СЕТЬ-А",
+    "Завод 3": "СЕТЬ-Б",
+    "Завод 4": "СЕТЬ-В",
+}
+PLANTS = list(PLANT_NETWORK)
+NETWORKS = sorted(set(PLANT_NETWORK.values()))
 
 SCHEMAS = ["dbo", "sales", "fin", "ops", "stg"]
 ENTITIES = [
@@ -97,11 +105,12 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
 
         l1, l2, l3 = rnd.choice(FOLDER_LEVELS)
         execs = 0 if rnd.random() < 0.22 else int(rnd.lognormvariate(3.2, 1.5))
+        plant_name = rnd.choice(PLANTS)
         rows.append(
             {
                 "№": i + 1,
-                "ТС": rnd.choice(NETWORKS),
-                "Завод": rnd.choice(PLANTS),
+                "ТС": PLANT_NETWORK[plant_name],
+                "Завод": plant_name,
                 "Каталог 1-го уровня": l1,
                 "Каталог 2-го уровня": l2,
                 "Каталог 3-го уровня": l3,
@@ -130,48 +139,61 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
 
     # Файл размеров повторяет выгрузку сегментов БД: строка на сегмент,
     # у части таблиц несколько секций, есть индексы и LOB-сегменты.
+    # Размер ведётся по заводам: на каждом заводе таблица занимает своё место.
+    # Часть таблиц намеренно не встречается ни в одном отчёте — список таблиц
+    # самостоятелен и не зависит от отчётов.
+    orphan_tables = [
+        f"{s}.STANDALONE_{i}" for i, s in enumerate(SCHEMAS[:4], start=1)
+    ]
     segments = []
-    for t in all_tables:
+    for t in all_tables + orphan_tables:
         # Часть таблиц намеренно без размера — проверка size_coverage_pct.
         if rnd.random() < 0.12:
             continue
         owner, table_name = t.split(".", 1)
         # Глубина хранения: чаще 30 и 45 дней, у части таблиц — заметно больше.
         retention = rnd.choice([30, 30, 30, 45, 45, 60, 90, 180, 365])
-        parts = 1 if rnd.random() < 0.85 else rnd.randint(2, 4)
-        for part in range(parts):
-            size_mb = round(rnd.lognormvariate(3.0, 1.6), 2)
-            segments.append(
-                {
-                    "OWNER": owner.upper(),
-                    "SEGMENT_NAME": table_name.upper(),
-                    "SEGMENT_TYPE": "TABLE" if parts == 1 else "TABLE PARTITION",
-                    "SIZE_MB": size_mb,
-                    "PERCENT_OF_TOTAL": None,
-                    "PERCENT_OF_SCHEMA": None,
-                    "Глубина хранения": retention,
-                }
-            )
-        # Индексный сегмент: имя своё, к таблице по выгрузке не привязывается.
-        if rnd.random() < 0.5:
-            segments.append(
-                {
-                    "OWNER": owner.upper(),
-                    "SEGMENT_NAME": f"IDX_{table_name.upper()}",
-                    "SEGMENT_TYPE": "INDEX",
-                    "SIZE_MB": round(rnd.lognormvariate(2.0, 1.2), 2),
-                    "PERCENT_OF_TOTAL": None,
-                    "PERCENT_OF_SCHEMA": None,
-                    "Глубина хранения": retention,
-                }
-            )
+        # Таблица живёт не на всех заводах и весит на них по-разному.
+        for plant_name in rnd.sample(PLANTS, rnd.randint(1, len(PLANTS))):
+            network_name = PLANT_NETWORK[plant_name]
+            scale = rnd.uniform(0.4, 2.5)
+            parts = 1 if rnd.random() < 0.85 else rnd.randint(2, 4)
+            for part in range(parts):
+                segments.append(
+                    {
+                        "ТС": network_name,
+                        "Завод": plant_name,
+                        "OWNER": owner.upper(),
+                        "SEGMENT_NAME": table_name.upper(),
+                        "SEGMENT_TYPE": "TABLE" if parts == 1 else "TABLE PARTITION",
+                        "SIZE_MB": round(rnd.lognormvariate(3.0, 1.6) * scale, 2),
+                        "PERCENT_OF_TOTAL": None,
+                        "PERCENT_OF_SCHEMA": None,
+                        "Глубина хранения": retention,
+                    }
+                )
+            # Индексный сегмент: имя своё, к таблице по выгрузке не привязывается.
+            if rnd.random() < 0.5:
+                segments.append(
+                    {
+                        "ТС": network_name,
+                        "Завод": plant_name,
+                        "OWNER": owner.upper(),
+                        "SEGMENT_NAME": f"IDX_{table_name.upper()}",
+                        "SEGMENT_TYPE": "INDEX",
+                        "SIZE_MB": round(rnd.lognormvariate(2.0, 1.2), 2),
+                        "PERCENT_OF_TOTAL": None,
+                        "PERCENT_OF_SCHEMA": None,
+                        "Глубина хранения": retention,
+                    }
+                )
 
     total = sum(s["SIZE_MB"] for s in segments)
     for i, seg in enumerate(segments, start=1):
         seg["№"] = i
         seg["PERCENT_OF_TOTAL"] = round(100.0 * seg["SIZE_MB"] / total, 4)
         seg["PERCENT_OF_SCHEMA"] = None
-    order = ["№", "OWNER", "SEGMENT_NAME", "SEGMENT_TYPE", "SIZE_MB",
+    order = ["№", "ТС", "Завод", "OWNER", "SEGMENT_NAME", "SEGMENT_TYPE", "SIZE_MB",
              "PERCENT_OF_TOTAL", "PERCENT_OF_SCHEMA", "Глубина хранения"]
     sizes_path = RAW_DIR / "sample_table_sizes.xlsx"
     pd.DataFrame(segments)[order].to_excel(sizes_path, index=False)

@@ -41,7 +41,8 @@ VIEWS = [
     "v_network_overview",
     "v_report_duration",
     "v_report_overlap",
-    "v_rc_tables",
+    "v_tables_catalog",
+    "v_report_table_size",
     "v_rc_report_tables",
     "v_rc_report_routines",
     "v_rc_report_usage",
@@ -320,8 +321,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 5.
-    expected = "781f44"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 6.
+    expected = "d0838e"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -338,7 +339,11 @@ def test_every_source_row_accounted_for(full_db):
 
 
 def test_exclusive_mb_never_exceeds_real_storage(full_db):
-    """Ключевая защита от двойного учёта общих таблиц."""
+    """Ключевая защита от двойного учёта общих таблиц.
+
+    Сравнение с полным объёмом всех заводов: отчёты живут на конкретных
+    площадках, поэтому их сумма заведомо не больше.
+    """
     total = full_db.execute("SELECT COALESCE(SUM(total_mb), 0) FROM fact_table_size").fetchone()[0]
     exclusive = full_db.execute(
         "SELECT COALESCE(SUM(exclusive_mb), 0) FROM v_report_footprint"
@@ -366,7 +371,10 @@ def test_exclusive_tables_belong_to_exactly_one_report(full_db):
             JOIN (SELECT table_id FROM bridge_report_table
                   GROUP BY table_id HAVING COUNT(DISTINCT report_id) = 1) e
               ON e.table_id = b.table_id
-            LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+            -- Через резолвер: размер берётся для завода отчёта. Прямое
+            -- соединение с fact_table_size размножило бы строки по заводам.
+            LEFT JOIN v_report_table_size s
+                   ON s.table_id = b.table_id AND s.report_id = b.report_id
             GROUP BY b.report_id
         )
         SELECT COUNT(*) FROM v_report_footprint f
@@ -448,27 +456,67 @@ def test_total_duration_is_execs_times_average(full_db):
 
 # --- Пять основных представлений в разрезе РЦ ----------------------------
 
-def test_rc_tables_are_one_to_one_per_rc(full_db):
-    """Таблица №1 — строго один объект на РЦ.
+def test_tables_catalog_holds_every_size_row(full_db):
+    """Таблица №1 — ВСЕ строки файла размеров, без потерь."""
+    sizes = full_db.execute("SELECT COUNT(*) FROM fact_table_size").fetchone()[0]
+    in_catalog = full_db.execute(
+        "SELECT COUNT(*) FROM v_tables_catalog WHERE NOT size_unknown"
+    ).fetchone()[0]
+    assert in_catalog == sizes
 
-    РЦ определяется парой «сеть + завод»: одно имя завода встречается в разных
-    сетях и означает разные площадки.
-    """
+
+def test_tables_catalog_is_independent_of_reports(full_db):
+    """Таблица попадает в №1, даже если на неё не ссылается ни один отчёт."""
+    orphans = full_db.execute(
+        "SELECT COUNT(*) FROM v_tables_catalog WHERE report_count = 0"
+    ).fetchone()[0]
+    assert orphans > 0, "в демо-данных есть таблицы вне отчётов — они обязаны быть видны"
+
+
+def test_tables_catalog_shows_nothing_twice(full_db):
+    """Строка на пару «таблица + завод», без дублей."""
     dupes = full_db.execute(
-        "SELECT COUNT(*) FROM (SELECT network, plant, full_name FROM v_rc_tables "
+        "SELECT COUNT(*) FROM (SELECT network, plant, full_name FROM v_tables_catalog "
         "GROUP BY 1, 2, 3 HAVING COUNT(*) > 1)"
     ).fetchone()[0]
     assert dupes == 0
 
 
-def test_rc_tables_exclude_views_and_routines(full_db):
-    """В №1 попадает только то, что занимает место."""
-    kinds = {
-        row[0] for row in full_db.execute(
-            "SELECT DISTINCT object_kind FROM v_rc_tables"
-        ).fetchall()
-    }
-    assert kinds <= {"TABLE", "MATERIALIZED VIEW"}, f"лишние типы: {kinds}"
+def test_table_size_differs_per_plant(full_db):
+    """Размер ведётся на завод: одна таблица на разных заводах весит своё."""
+    varying = full_db.execute(
+        "SELECT COUNT(*) FROM (SELECT table_id FROM fact_table_size "
+        "GROUP BY table_id HAVING COUNT(DISTINCT plant) > 1 "
+        "AND COUNT(DISTINCT total_mb) > 1)"
+    ).fetchone()[0]
+    assert varying > 0
+
+
+def test_size_resolver_does_not_multiply_rows(full_db):
+    """Резолвер обязан давать ровно одну строку размера на связь.
+
+    Прямое соединение с fact_table_size по table_id размножило бы строки по
+    числу заводов и завысило суммы в разы.
+    """
+    links = full_db.execute("SELECT COUNT(*) FROM bridge_report_table").fetchone()[0]
+    resolved = full_db.execute("SELECT COUNT(*) FROM v_report_table_size").fetchone()[0]
+    assert resolved == links
+
+
+def test_size_resolver_picks_the_plant_of_the_report(full_db):
+    """Отчёту достаётся размер его собственного завода, а не чужого."""
+    wrong = full_db.execute(
+        """
+        SELECT COUNT(*) FROM v_report_table_size v
+        JOIN dim_report r ON r.report_id = v.report_id
+        JOIN fact_table_size s
+          ON s.table_id = v.table_id
+         AND s.network = COALESCE(r.network, '(не указана)')
+         AND s.plant   = COALESCE(r.plant, '(не указан)')
+        WHERE v.size_is_plant_specific AND v.total_mb IS DISTINCT FROM s.total_mb
+        """
+    ).fetchone()[0]
+    assert wrong == 0
 
 
 def test_rc_report_tables_contain_only_real_tables(full_db):
@@ -547,8 +595,11 @@ def test_report_summary_totals_match_its_tables(full_db):
             SELECT b.report_id, ROUND(COALESCE(SUM(s.total_mb), 0), 2) AS mb,
                    COUNT(*) AS n
             FROM bridge_report_table b
-            JOIN dim_table t            ON t.table_id = b.table_id
-            LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+            JOIN dim_table t ON t.table_id = b.table_id
+            -- Только через резолвер: он даёт ровно одну строку размера на
+            -- связь, для завода этого отчёта.
+            LEFT JOIN v_report_table_size s
+                   ON s.table_id = b.table_id AND s.report_id = b.report_id
             WHERE t.object_kind = 'TABLE'
             GROUP BY b.report_id
         )
