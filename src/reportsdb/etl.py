@@ -64,6 +64,10 @@ class LoadStats:
     sizes_loaded: int = 0
     tables_only_in_sizes: int = 0
     size_plants: int = 0
+    # Колонки типа сегмента в файле нет — отфильтровать индексы невозможно.
+    segment_type_column_missing: bool = False
+    # Колонка есть, но ячейка пуста: строка засчитана как таблица.
+    segments_without_type: int = 0
     usage_loaded: int = 0
     usage_unmatched: list[str] = field(default_factory=list)
 
@@ -308,12 +312,22 @@ def _load_table_sizes(
     allowed = {t.strip().upper() for t in section.segment_types}
     acc: dict[tuple[int, str, str], dict] = {}
 
+    # Без колонки типа индексные и LOB-сегменты не отличить от таблиц: они
+    # станут отдельными «таблицами» и завысят и их число, и объём. Молча
+    # этого делать нельзя — предупреждаем в сводке загрузки.
+    if allowed and not cols.get("segment_type"):
+        stats.segment_type_column_missing = True
+
     for _, row in df.iterrows():
         segment_type = clean_text(_cell(row, cols.get("segment_type")))
         if allowed and segment_type is not None:
             if segment_type.strip().upper() not in allowed:
                 stats.segments_skipped += 1
                 continue
+        if allowed and segment_type is None and cols.get("segment_type"):
+            # Колонка есть, но значение пустое. Отбросить нельзя — вдруг это
+            # настоящая таблица; засчитываем, но считаем такие строки.
+            stats.segments_without_type += 1
 
         full = clean_text(_cell(row, cols.get("full_name")))
         schema_name = clean_text(_cell(row, cols.get("schema_name")))
@@ -564,6 +578,13 @@ def print_summary(stats: LoadStats) -> None:
             print(f"     таблиц только в файле размеров: {stats.tables_only_in_sizes}")
         if stats.segments_skipped:
             print(f"     пропущено сегментов не-табличных типов: {stats.segments_skipped}")
+        if stats.segment_type_column_missing:
+            print("  !  колонка типа сегмента не найдена: индексы и LOB-сегменты")
+            print("     попали в список таблиц и завысили и их число, и объём.")
+            print("     Проверьте: python -m reportsdb diagnose")
+        if stats.segments_without_type:
+            print(f"  !  строк с пустым типом сегмента: {stats.segments_without_type}"
+                  " (засчитаны как таблицы)")
     if stats.usage_loaded or stats.usage_unmatched:
         print(f"  строк использования: {stats.usage_loaded}")
         if stats.usage_unmatched:

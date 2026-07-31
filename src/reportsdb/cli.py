@@ -32,6 +32,20 @@ def main(argv: list[str] | None = None) -> int:
     p_export.add_argument("--db", type=Path, default=DB_PATH)
     p_export.add_argument("--out", type=Path, default=None)
 
+    p_diag = sub.add_parser(
+        "diagnose", help="сверить файл размеров с тем, что попало в базу"
+    )
+    p_diag.add_argument(
+        "file", type=Path, nargs="?",
+        help="файл размеров; по умолчанию — из mapping.yml",
+    )
+    p_diag.add_argument("--db", type=Path, default=DB_PATH)
+    p_diag.add_argument("--config", type=Path, default=None)
+    p_diag.add_argument(
+        "--show-names", action="store_true",
+        help="печатать имена таблиц (по умолчанию только числа)",
+    )
+
     sub.add_parser("sample", help="сгенерировать синтетические данные в data/raw/")
 
     args = parser.parse_args(argv)
@@ -76,6 +90,13 @@ def main(argv: list[str] | None = None) -> int:
         print_summary(stats)
         print(f"\nБД: {args.db}")
         return 0
+
+    if args.command == "diagnose":
+        from .diagnose import diagnose
+
+        return diagnose(
+            load_mapping(args.config), args.db, args.file, args.show_names
+        )
 
     if args.command == "export-html":
         from .export_html import export

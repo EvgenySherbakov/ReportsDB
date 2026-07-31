@@ -237,6 +237,48 @@ def test_index_segments_are_not_counted_as_tables(full_db):
     assert leaked == 0
 
 
+def test_missing_segment_type_column_is_reported(paths, tmp_path_factory):
+    """Без колонки типа индексы не отфильтровать — загрузка обязана сказать это.
+
+    Самая дорогая из тихих ошибок: индексные сегменты становятся отдельными
+    «таблицами» и завышают и число таблиц, и суммарный объём. Заказчик видит
+    расхождение с исходным файлом и не понимает, откуда оно.
+    """
+    import pandas as pd
+
+    df = pd.read_excel(paths["sizes"], dtype=str)
+    broken = tmp_path_factory.mktemp("sizes") / "no_type.xlsx"
+    df.drop(columns=["SEGMENT_TYPE"]).to_excel(broken, index=False)
+
+    mapping = load_mapping()
+    mapping.table_sizes.file = str(broken)
+    db = tmp_path_factory.mktemp("db") / "no_type.duckdb"
+    stats = build(paths["reports"], db, mapping)
+
+    assert stats.segment_type_column_missing, "молчать об этом нельзя"
+
+    # И убеждаемся, что предупреждение не напрасное: индексы действительно
+    # просочились в список таблиц.
+    con = duckdb.connect(str(db), read_only=True)
+    leaked = con.execute(
+        "SELECT COUNT(*) FROM dim_table WHERE table_name ILIKE 'IDX!_%' ESCAPE '!'"
+    ).fetchone()[0]
+    con.close()
+    assert leaked > 0
+
+
+def test_segment_type_column_present_is_not_flagged(full_db, paths):
+    """На нормальном файле ложной тревоги быть не должно."""
+    mapping = load_mapping()
+    mapping.table_sizes.file = str(paths["sizes"])
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        stats = build(paths["reports"], Path(tmp) / "ok.duckdb", mapping)
+    assert not stats.segment_type_column_missing
+    assert stats.segments_without_type == 0
+
+
 def test_usage_comes_from_main_file(full_db):
     """Частота и длительность приходят из основного файла, без отдельного."""
     filled = full_db.execute(

@@ -63,8 +63,13 @@ streamlit run app/Home.py                                    # открыть а
 ```bash
 python -m reportsdb profile data/raw/reports.xlsx   # что в файле
 python -m reportsdb build   data/raw/reports.xlsx   # собрать базу
+python -m reportsdb diagnose                        # сверить размеры с базой
 streamlit run app/Home.py                           # смотреть
 ```
+
+`diagnose` нужен, когда числа в таблице №1 расходятся с исходным файлом: он
+показывает, какие колонки распознаны, сколько строк какого типа сегмента учтено
+и совпадает ли итог с базой. Имена таблиц не печатает — только числа.
 
 Имена колонок нигде в коде не зашиты — только в `config/mapping.yml`.
 
