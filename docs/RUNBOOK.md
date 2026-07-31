@@ -139,9 +139,11 @@ streamlit run app/Home.py
 
 Либо через интерфейс (страница **Загрузка данных**), либо командой:
 
-```bash
-python -m reportsdb build data/raw/ваш_файл.xlsx
+```bat
+scripts\rdb.bat build data\raw\ваш_файл.xlsx
 ```
+
+macOS/Linux — `scripts/rdb.sh build data/raw/ваш_файл.xlsx`.
 
 ### Остановить
 
@@ -161,10 +163,11 @@ python -m reportsdb build data/raw/ваш_файл.xlsx
   **Скачать**;
 - или выполняет в терминале:
 
-  ```bash
-  python -m reportsdb export-html
+  ```bat
+  scripts\rdb.bat export-html
   ```
 
+  (macOS/Linux — `scripts/rdb.sh export-html`.)
   Файл появится в `dist/reportsdb.html`.
 
 ### Как пользоваться
@@ -212,8 +215,12 @@ python -m reportsdb build data/raw/ваш_файл.xlsx
 > вы насчитали, или объём не тот — запустите сверку:
 >
 > ```
-> python -m reportsdb diagnose
+> scripts\rdb.bat diagnose
 > ```
+>
+> (macOS/Linux — `scripts/rdb.sh diagnose`.) Именно через `rdb`, а не
+> `python -m reportsdb`: приложение живёт в виртуальном окружении проекта, и
+> обычная консоль пакета не видит — отвечает «No module named reportsdb».
 >
 > Она читает файл размеров ровно так же, как загрузчик, и показывает, на каком
 > шаге числа расходятся: какие колонки распознаны, сколько строк какого типа

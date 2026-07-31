@@ -26,14 +26,17 @@ Excel-выгрузка по отчётам SSRS превращается в ло
 
 ### Посмотреть на демо-данных (ничего своего не нужно)
 
-```bash
-python -m reportsdb sample                                   # синтетический Excel
-python -m reportsdb build --config config/mapping.sample.yml \
-    data/raw/sample_reports.xlsx                             # собрать БД
-streamlit run app/Home.py                                    # открыть аналитику
-```
+Одной командой: `scripts\run.bat` (Windows), `./scripts/run.sh` (Linux/macOS) —
+демо-данные сгенерируются сами, если базы ещё нет.
 
-Или одной командой: `./scripts/run.sh` (Linux/macOS), `scripts\run.bat` (Windows).
+По шагам то же самое:
+
+```bash
+scripts/rdb.sh sample                                   # синтетический Excel
+scripts/rdb.sh build --config config/mapping.sample.yml \
+    data/raw/sample_reports.xlsx                        # собрать БД
+scripts/run.sh                                          # открыть аналитику
+```
 
 ### Загрузить свои данные
 
@@ -58,13 +61,23 @@ streamlit run app/Home.py                                    # открыть а
 выбрать, что чем является, проверить сопоставление колонок и нажать
 **Загрузить**. Пошагово — в [RUNBOOK](docs/RUNBOOK.md#как-загружать-данные).
 
-**Через командную строку:**
+**Через командную строку.** Запускайте через `scripts\rdb.bat` (Windows) или
+`scripts/rdb.sh` (macOS/Linux): приложение живёт в виртуальном окружении
+проекта, и `python -m reportsdb` из обычной консоли его не видит — падает с
+«No module named reportsdb».
+
+```bat
+scripts\rdb.bat profile data\raw\reports.xlsx   :: что в файле
+scripts\rdb.bat build   data\raw\reports.xlsx   :: собрать базу
+scripts\rdb.bat diagnose                        :: сверить размеры с базой
+scripts\run.bat                                 :: смотреть
+```
 
 ```bash
-python -m reportsdb profile data/raw/reports.xlsx   # что в файле
-python -m reportsdb build   data/raw/reports.xlsx   # собрать базу
-python -m reportsdb diagnose                        # сверить размеры с базой
-streamlit run app/Home.py                           # смотреть
+scripts/rdb.sh profile data/raw/reports.xlsx    # что в файле
+scripts/rdb.sh build   data/raw/reports.xlsx    # собрать базу
+scripts/rdb.sh diagnose                         # сверить размеры с базой
+scripts/run.sh                                  # смотреть
 ```
 
 `diagnose` нужен, когда числа в таблице №1 расходятся с исходным файлом: он
@@ -91,7 +104,7 @@ docker compose -f docker/docker-compose.yml up --build
 **Через HTML** — им не нужно ничего:
 
 ```bash
-python -m reportsdb export-html      # → dist/reportsdb.html (~100 КБ)
+scripts/rdb.sh export-html      # → dist/reportsdb.html (~100 КБ)
 ```
 
 Либо кнопкой **Собрать HTML-файл** внизу страницы «Загрузка данных».
