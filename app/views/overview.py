@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pandas as pd
 import plotly.express as px
 import streamlit as st
 
@@ -13,58 +12,52 @@ from _shared import (
     num,
     page_setup,
     query,
+    rc_selector,
     show_table,
 )
 
 page_setup("Обзор отчётности SSRS", "🗂️")
 missing_facts_notice()
 
+network, plant = rc_selector()
+
+# Все показатели страницы считаются в разрезе выбранного РЦ. Отчёты фильтруются
+# по своим сети и заводу, таблицы — по своим: размер одной таблицы на разных
+# заводах разный, и складывать заводы в один итог нельзя.
+scope = "по всем ТС и заводам" if network is None else f"{network} · {plant}"
+st.subheader(f"Показатели: {scope}")
+
+if network is None:
+    where_reports, where_tables, params = "TRUE", "TRUE", ()
+else:
+    where_reports = (
+        "COALESCE(network, '(не указана)') = ? AND COALESCE(plant, '(не указан)') = ?"
+    )
+    where_tables = "network = ? AND plant = ?"
+    params = (network, plant)
+
 kpi = query(
-    """
+    f"""
     SELECT
-        (SELECT COUNT(*) FROM dim_report)                         AS reports,
-        (SELECT COUNT(*) FROM dim_table)                          AS tables,
-        (SELECT COUNT(*) FROM bridge_report_table)                AS links,
-        (SELECT COUNT(*) FROM v_table_criticality WHERE is_orphan) AS orphans,
-        (SELECT ROUND(SUM(total_mb), 1) FROM fact_table_size)     AS total_mb,
-        (SELECT ROUND(SUM(exclusive_pct_of_db), 1) FROM v_report_footprint) AS pct_of_db,
-        (SELECT COUNT(*) FROM dim_report WHERE uses_view)         AS with_view,
-        (SELECT ROUND(SUM(total_duration_sec) / 3600.0, 1) FROM v_report_cost_value) AS hours,
-        (SELECT ROUND(AVG(size_coverage_pct), 0) FROM v_report_footprint) AS coverage
-    """
+        (SELECT COUNT(*) FROM dim_report WHERE {where_reports})          AS reports,
+        (SELECT COUNT(DISTINCT full_name) FROM v_tables_catalog
+          WHERE {where_tables})                                          AS tables,
+        (SELECT ROUND(SUM(total_mb), 1) FROM v_tables_catalog
+          WHERE {where_tables})                                          AS total_mb
+    """,
+    params * 3 if params else (),
 ).iloc[0]
 
-
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3 = st.columns(3)
 c1.metric("Отчётов", num(kpi.reports))
-c2.metric("Таблиц-источников", num(kpi.tables))
-c3.metric("Связей", num(kpi.links))
-c4.metric(
-    "Отчётов через view",
-    num(kpi.with_view),
-    help="У них список таблиц заведомо неполон: за view стоят другие таблицы.",
+c2.metric(
+    "Таблиц", num(kpi.tables),
+    help="Из таблицы №1 «Таблицы и размеры» — то есть из файла размеров. "
+         "Считаются сами таблицы, а не строки «таблица + завод».",
 )
-
-c5, c6, c7, c8 = st.columns(4)
-c5.metric(
-    "Объём таблиц, МБ",
-    num(kpi.total_mb),
-    help="Суммарный размер уникальных таблиц — без двойного учёта общих.",
-)
-c6.metric(
-    "Доля БД под отчётами",
-    num(kpi.pct_of_db, "%", 1),
-    help="Сумма долей эксклюзивных таблиц всех отчётов в общем объёме базы.",
-)
-c7.metric(
-    "Время на отчёты, ч",
-    num(kpi.hours, "", 1),
-    help="Обращения × средняя длительность, сложенные по всем отчётам.",
-)
-c8.metric(
-    "Покрытие размерами",
-    num(kpi.coverage, "%"),
-    help="Средняя доля таблиц отчёта, для которых известен размер.",
+c3.metric(
+    "Объём таблиц, МБ", num(kpi.total_mb, decimals=1),
+    help="Сумма размеров таблиц из файла размеров по выбранному разрезу.",
 )
 
 st.divider()
@@ -73,7 +66,16 @@ left, right = st.columns([3, 2])
 
 with left:
     st.subheader("Отчёты по папкам каталога")
-    catalog = query("SELECT * FROM v_catalog_overview")
+    catalog = query(
+        f"""
+        SELECT folder_l1, folder_l2, folder_l3, COUNT(*) AS report_count
+        FROM dim_report
+        WHERE {where_reports}
+        GROUP BY 1, 2, 3
+        ORDER BY report_count DESC
+        """,
+        params,
+    )
     # На диаграмме — верхний уровень; полная иерархия ниже в таблице.
     by_l1 = catalog.groupby("folder_l1", as_index=False).agg(
         report_count=("report_count", "sum"))
@@ -93,18 +95,26 @@ with left:
         "folder_l2": "Каталог 2",
         "folder_l3": "Каталог 3",
         "report_count": "Отчётов",
-        "reports_with_view": "Из них через view",
-        "table_links": "Связей с таблицами",
-        "exclusive_mb": st.column_config.NumberColumn("Освободится, МБ", format="%.1f"),
-        "exclusive_pct_of_db": st.column_config.NumberColumn("Доля БД, %", format="%.3f"),
-        "total_duration_sec": st.column_config.NumberColumn("Время, с", format="%.0f"),
-        "avg_size_coverage_pct": st.column_config.NumberColumn("Покрытие размерами, %", format="%.0f"),
     })
     download(shown, "catalog_overview.csv")
 
 with right:
     st.subheader("Схемы БД")
-    schemas = query("SELECT * FROM v_schema_overview")
+    # Схемы тоже в разрезе РЦ: таблицы берутся из каталога размеров.
+    schemas = query(
+        f"""
+        -- LOWER на случай базы, собранной до приведения схем к одному регистру.
+        SELECT LOWER(schema_name) AS schema_name,
+               COUNT(DISTINCT full_name) AS table_count,
+               ROUND(SUM(total_mb), 1)   AS total_mb,
+               ROUND(SUM(percent_of_total), 2) AS percent_of_db
+        FROM v_tables_catalog
+        WHERE {where_tables}
+        GROUP BY 1
+        ORDER BY total_mb DESC NULLS LAST
+        """,
+        params,
+    )
     if not schemas.empty and schemas["total_mb"].notna().any():
         sized = schemas.dropna(subset=["total_mb"]).sort_values("total_mb")
         fig = px.bar(
@@ -119,10 +129,8 @@ with right:
         st.plotly_chart(fig, use_container_width=True)
     show_table(schemas, {
         "percent_of_db": st.column_config.NumberColumn("Доля БД, %", format="%.2f"),
-        "orphan_table_count": "Таблиц без отчётов",
-        "report_links": "Связей с отчётами",
+        "table_count": "Таблиц",
         "total_mb": st.column_config.NumberColumn("Объём, МБ", format="%.1f"),
-        "total_rows": "Строк",
     })
 
 st.divider()

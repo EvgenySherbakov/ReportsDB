@@ -237,6 +237,20 @@ def test_index_segments_are_not_counted_as_tables(full_db):
     assert leaked == 0
 
 
+def test_schema_names_have_one_case(full_db):
+    """Одна схема — одна запись, а не «dbo» и «DBO» по отдельности.
+
+    Из отчётов схема приходит как «dbo», из выгрузки сегментов как «DBO».
+    Без приведения к одному регистру сводки по схемам двоились: половина
+    объёма уходила в схему-двойник.
+    """
+    total, lowered = full_db.execute(
+        "SELECT COUNT(DISTINCT schema_name), COUNT(DISTINCT LOWER(schema_name)) "
+        "FROM dim_table"
+    ).fetchone()
+    assert total == lowered
+
+
 def test_missing_segment_type_column_is_reported(paths, tmp_path_factory):
     """Без колонки типа индексы не отфильтровать — загрузка обязана сказать это.
 

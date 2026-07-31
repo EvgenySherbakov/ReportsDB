@@ -265,8 +265,11 @@ def _load_reports(
     _insert(
         con,
         "dim_table",
+        # Схема хранится в нижнем регистре — как и full_name. Из отчётов она
+        # приходит как «dbo», из выгрузки сегментов как «DBO»; без приведения
+        # одна и та же схема двоилась бы в сводках и фильтрах.
         [
-            (tid, schema, name, key, kind, origin, ok)
+            (tid, schema.lower(), name, key, kind, origin, ok)
             for key, (tid, schema, name, ok, kind, origin) in tables.items()
         ],
         ["table_id", "schema_name", "table_name", "full_name", "object_kind",
@@ -351,7 +354,10 @@ def _load_table_sizes(
             next_id += 1
             known[key] = table_id
             new_objects.append(
-                (table_id, obj_schema, obj_name, key, "TABLE", "файл размеров", parsed_ok)
+                # Схема в нижнем регистре — см. загрузку отчётов: иначе «DBO»
+                # из выгрузки сегментов и «dbo» из отчётов станут двумя схемами.
+                (table_id, obj_schema.lower(), obj_name, key, "TABLE",
+                 "файл размеров", parsed_ok)
             )
             stats.tables_only_in_sizes += 1
 

@@ -19,6 +19,7 @@ from _shared import (
     query,
     rc_scope,
     rc_selector,
+    row_picker,
     search_box,
     show_table,
     surface_color,
@@ -26,7 +27,8 @@ from _shared import (
 
 page_setup("Карточка отчёта", "🔍")
 st.caption(
-    "Щёлкните по строке отчёта — ниже появятся его таблицы, размеры и статистика."
+    "Щёлкните по строке отчёта — ниже появятся его таблицы, размеры и "
+    "статистика. Повторный щелчок по выбранной строке снимает выбор."
 )
 
 network, plant = rc_selector()
@@ -42,27 +44,38 @@ if view.empty:
     st.info("Ничего не найдено. Измените условие поиска.")
     st.stop()
 
-# --- Таблица отчётов с выбором строки ---------------------------------------
+# --- Список отчётов с выбором строки ----------------------------------------
+# Строки-кнопки, а не st.dataframe: тот выбирает строку только флажком в левой
+# колонке, щелчок по самой строке он игнорирует.
 
-grid = view[[
-    "report_no", "report_name", "network", "plant", "catalog_path",
-    "table_count", "tables_total_mb", "tables_exclusive_mb", "exec_count",
-    "avg_duration_sec", "uses_view",
-]].sort_values("tables_total_mb", ascending=False).reset_index(drop=True)
+SORTS = {
+    "По размеру таблиц": ("tables_total_mb", False),
+    "По числу запусков": ("exec_count", False),
+    "По числу таблиц": ("table_count", False),
+    "По наименованию": ("report_name", True),
+}
+sort_by = st.selectbox("Сортировка", list(SORTS), key="card_sort")
+column, ascending = SORTS[sort_by]
+ordered = view.sort_values(column, ascending=ascending, na_position="last")
 
-event = st.dataframe(
-    grid,
-    use_container_width=True,
-    hide_index=True,
-    height=360,
-    on_select="rerun",
-    selection_mode="single-row",
-    column_config={
+full = row_picker(
+    ordered, "report_id", "card",
+    lambda r: (
+        f"**{r['report_name']}**  ·  {num(r['table_count'])} табл.  ·  "
+        f"{num(r['tables_total_mb'], ' МБ', 1)}  ·  "
+        f"{num(r['exec_count'])} запусков  ·  {r['plant'] or '—'}"
+    ),
+)
+
+with st.expander("Показать таблицей — сортировка по колонкам и выгрузка"):
+    grid = ordered[[
+        "report_no", "report_name", "network", "plant", "catalog_path",
+        "table_count", "tables_total_mb", "tables_exclusive_mb", "exec_count",
+        "avg_duration_sec", "uses_view",
+    ]].reset_index(drop=True)
+    show_table(grid, {
         "report_no": st.column_config.TextColumn("№", width="small"),
         "report_name": st.column_config.TextColumn("Отчёт", width="large"),
-        "network": "ТС",
-        "plant": "Завод",
-        "catalog_path": "Каталог",
         "table_count": st.column_config.NumberColumn("Таблиц"),
         "tables_total_mb": st.column_config.NumberColumn(
             "Размер таблиц, МБ", format="%.1f"),
@@ -71,26 +84,20 @@ event = st.dataframe(
         "exec_count": st.column_config.NumberColumn("Запусков"),
         "avg_duration_sec": st.column_config.NumberColumn("Ср. длит., с", format="%.1f"),
         "uses_view": st.column_config.CheckboxColumn("Через view"),
-    },
-)
-download(grid, "reports.csv", "Выгрузить список отчётов")
+    }, height=360)
+    download(grid, "reports.csv", "Выгрузить список отчётов")
 
-rows = event.selection.rows if event and event.selection else []
-if not rows:
-    st.info("👆 Выберите отчёт в таблице выше, чтобы увидеть его карточку.")
+if full is None:
+    st.info("👆 Щёлкните по строке отчёта, чтобы увидеть его карточку.")
     st.stop()
-
-report = grid.iloc[rows[0]]
-full = view[view["report_name"] == report["report_name"]]
-full = full[full["catalog_path"] == report["catalog_path"]].iloc[0]
 
 # --- Карточка выбранного отчёта ---------------------------------------------
 
 st.divider()
-st.header(report["report_name"])
+st.header(full["report_name"])
 st.caption(
-    f"№ {report['report_no'] or '—'} · {report['network'] or '—'} · "
-    f"{report['plant'] or '—'} · `{report['catalog_path']}`"
+    f"№ {full['report_no'] or '—'} · {full['network'] or '—'} · "
+    f"{full['plant'] or '—'} · `{full['catalog_path']}`"
 )
 
 m1, m2, m3, m4, m5 = st.columns(5)
@@ -137,13 +144,17 @@ tabs = st.tabs(["Таблицы", "Функции и процедуры", "Пр�
 with tabs[0]:
     tables = query(
         """
+        -- Размер берётся через v_report_table_size, а не прямым join к
+        -- fact_table_size: там строка на каждый завод, и прямой join размножил
+        -- бы таблицы отчёта по числу заводов.
         SELECT t.full_name, t.schema_name, s.total_mb, s.percent_of_total,
                s.retention_days, s.row_count, s.segment_count,
                (SELECT COUNT(DISTINCT x.report_id) FROM bridge_report_table x
                 WHERE x.table_id = t.table_id) AS used_by_reports
         FROM bridge_report_table b
-        JOIN dim_table t            ON t.table_id = b.table_id
-        LEFT JOIN fact_table_size s ON s.table_id = b.table_id
+        JOIN dim_table t                ON t.table_id = b.table_id
+        LEFT JOIN v_report_table_size s ON s.table_id = b.table_id
+                                       AND s.report_id = b.report_id
         WHERE b.report_id = ? AND t.object_kind = 'TABLE'
         ORDER BY s.total_mb DESC NULLS LAST
         """,

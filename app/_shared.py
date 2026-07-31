@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import duckdb
@@ -259,6 +260,105 @@ def num(value, suffix: str = "", decimals: int = 0) -> str:
 def is_blank(value) -> bool:
     """Пустое ли значение. Безопасно для pd.NA, NaN, None и обычных чисел."""
     return value is None or pd.isna(value)
+
+
+# Строки-кнопки выравниваются по левому краю: иначе Streamlit центрирует
+# подпись, и список перестаёт читаться как таблица. Селектор цепляется за
+# класс st-key-<ключ>, который Streamlit вешает на контейнер с key — обёртка
+# из st.markdown кнопки не охватывает, они рендерятся отдельными блоками.
+# Внутри кнопки Streamlit ещё два слоя (div и span) со своим
+# justify-content: center — выравнивать нужно каждый, иначе подпись остаётся
+# по центру, сколько ни правь саму кнопку.
+_ROW_CSS = """
+<style>
+.st-key-%(key)s button {
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+}
+.st-key-%(key)s button,
+.st-key-%(key)s button > div,
+.st-key-%(key)s button span {
+    justify-content: flex-start !important;
+}
+.st-key-%(key)s button > div,
+.st-key-%(key)s button span,
+.st-key-%(key)s button p {
+    width: 100%%;
+    text-align: left !important;
+    margin: 0;
+}
+</style>
+"""
+
+
+def row_picker(
+    df: pd.DataFrame,
+    id_column: str,
+    key: str,
+    label: Callable[[pd.Series], str],
+    page_size: int = 15,
+) -> pd.Series | None:
+    """Список строк, где нажимается вся строка целиком.
+
+    `st.dataframe` умеет выбирать строку только флажком в левой колонке —
+    щелчок по самой строке он игнорирует (проверено на Streamlit 1.60).
+    Заказчику нужен именно щелчок по строке, поэтому каждая строка — кнопка
+    во всю ширину.
+
+    Выбор хранится по значению `id_column`, а не по номеру строки: при смене
+    сортировки или фильтра номер уезжает, а выбранная строка должна остаться
+    той же. Возвращает выбранную строку или None.
+    """
+    if df.empty:
+        return None
+
+    box_key = f"rows_{key}"
+    st.markdown(_ROW_CSS % {"key": box_key}, unsafe_allow_html=True)
+    chosen_key = f"pick_{key}"
+    page_key = f"page_{key}"
+
+    pages = max(1, -(-len(df) // page_size))
+    page = min(st.session_state.get(page_key, 1), pages)
+    start = (page - 1) * page_size
+    window = df.iloc[start:start + page_size]
+
+    with st.container(key=box_key):
+        for _, row in window.iterrows():
+            row_id = row[id_column]
+            selected = st.session_state.get(chosen_key) == row_id
+            if st.button(
+                label(row),
+                key=f"{key}_row_{row_id}",
+                use_container_width=True,
+                type="primary" if selected else "secondary",
+            ):
+                # Повторный щелчок по выбранной строке снимает выбор.
+                st.session_state[chosen_key] = None if selected else row_id
+                st.rerun()
+
+    if pages > 1:
+        back, info, forward = st.columns([1, 2, 1])
+        if back.button("‹ Назад", key=f"{key}_prev", disabled=page <= 1,
+                       use_container_width=True):
+            st.session_state[page_key] = page - 1
+            st.rerun()
+        info.markdown(
+            f"<div style='text-align:center;padding-top:0.5rem'>"
+            f"Страница {page} из {pages} · строк {len(df)}</div>",
+            unsafe_allow_html=True,
+        )
+        if forward.button("Вперёд ›", key=f"{key}_next", disabled=page >= pages,
+                          use_container_width=True):
+            st.session_state[page_key] = page + 1
+            st.rerun()
+
+    picked = st.session_state.get(chosen_key)
+    if picked is None:
+        return None
+    match = df[df[id_column] == picked]
+    if match.empty:  # строка ушла из-под фильтра — выбор снимаем
+        return None
+    return match.iloc[0]
 
 
 def download(df: pd.DataFrame, filename: str, label: str = "Выгрузить CSV") -> None:
