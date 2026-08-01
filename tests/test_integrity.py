@@ -238,6 +238,123 @@ def test_index_segments_are_not_counted_as_tables(full_db):
     assert leaked == 0
 
 
+def _split_by_plant(path: Path, out_dir: Path, prefix: str) -> list[Path]:
+    """Режет файл по заводам — имитирует выгрузку «файл на завод»."""
+    import pandas as pd
+
+    df = pd.read_excel(path, dtype=str)
+    made = []
+    for plant in sorted(df["Завод"].dropna().unique()):
+        target = out_dir / f"{prefix}_{plant.replace(' ', '')}.xlsx"
+        df[df["Завод"] == plant].to_excel(target, index=False)
+        made.append(target)
+    return made
+
+
+def test_files_per_plant_load_same_as_one_file(paths, tmp_path_factory):
+    """Разрезанные по заводам файлы дают ту же базу, что и один общий файл.
+
+    Данные приходят по файлу на завод, и склейка не должна ни терять строки,
+    ни складывать размеры разных заводов в один.
+    """
+    split_dir = tmp_path_factory.mktemp("split")
+    report_files = _split_by_plant(paths["reports"], split_dir, "reports")
+    size_files = _split_by_plant(paths["sizes"], split_dir, "sizes")
+    assert len(report_files) > 1 and len(size_files) > 1, "нужно несколько заводов"
+
+    def snapshot(source, sizes) -> dict:
+        mapping = load_mapping()
+        mapping.table_sizes.files = [str(p) for p in sizes]
+        mapping.report_usage.files = []
+        db = tmp_path_factory.mktemp("db") / "cmp.duckdb"
+        build(source, db, mapping)
+        con = duckdb.connect(str(db), read_only=True)
+        one = lambda sql: con.execute(sql).fetchone()[0]  # noqa: E731
+        out = {
+            "size_rows": one("SELECT COUNT(*) FROM fact_table_size"),
+            "sized_tables": one("SELECT COUNT(DISTINCT table_id) FROM fact_table_size"),
+            "total_mb": round(one("SELECT COALESCE(SUM(total_mb), 0) FROM fact_table_size"), 1),
+            "plants": one("SELECT COUNT(*) FROM (SELECT DISTINCT network, plant "
+                          "FROM fact_table_size)"),
+            "objects": one("SELECT COUNT(*) FROM dim_table"),
+            "links": one("SELECT COUNT(*) FROM bridge_report_table"),
+            "reports": one("SELECT COUNT(*) FROM dim_report WHERE plant IS NOT NULL"),
+        }
+        con.close()
+        return out
+
+    # Эталон — те же данные одним файлом. Строки без завода в нарезку не
+    # попадают, поэтому отчёты сравниваем только те, у которых завод указан.
+    assert snapshot(report_files, size_files) == snapshot(paths["reports"],
+                                                          [paths["sizes"]])
+
+
+def test_several_size_files_without_plant_are_reported(paths, tmp_path_factory):
+    """Несколько файлов размеров без колонки завода — молча неверные цифры.
+
+    Строки всех заводов лягут в «(не указан)» и сложатся в один размер, при
+    этом никакой ошибки не возникнет. Единственная защита — предупреждение.
+    """
+    import pandas as pd
+
+    split_dir = tmp_path_factory.mktemp("noplant")
+    report_files = _split_by_plant(paths["reports"], split_dir, "reports")
+    stripped = []
+    for path in _split_by_plant(paths["sizes"], split_dir, "sizes"):
+        target = split_dir / f"np_{path.name}"
+        pd.read_excel(path, dtype=str).drop(columns=["ТС", "Завод"]).to_excel(
+            target, index=False)
+        stripped.append(target)
+
+    mapping = load_mapping()
+    mapping.table_sizes.files = [str(p) for p in stripped]
+    mapping.report_usage.files = []
+    db = tmp_path_factory.mktemp("db") / "noplant.duckdb"
+    stats = build(report_files, db, mapping)
+
+    assert stats.size_files_without_plant, "молчать об этом нельзя"
+
+    # И предупреждение не напрасное: заводы действительно схлопнулись в один.
+    con = duckdb.connect(str(db), read_only=True)
+    plants = con.execute(
+        "SELECT COUNT(*) FROM (SELECT DISTINCT network, plant FROM fact_table_size)"
+    ).fetchone()[0]
+    con.close()
+    assert plants == 1
+
+
+def test_one_size_file_without_plant_is_not_flagged(paths, tmp_path_factory):
+    """Один файл без завода — обычный случай, тревожить не о чем."""
+    import pandas as pd
+
+    tmp = tmp_path_factory.mktemp("single")
+    target = tmp / "sizes.xlsx"
+    pd.read_excel(paths["sizes"], dtype=str).drop(columns=["ТС", "Завод"]).to_excel(
+        target, index=False)
+
+    mapping = load_mapping()
+    mapping.table_sizes.files = [str(target)]
+    mapping.report_usage.files = []
+    stats = build(paths["reports"], tmp / "one.duckdb", mapping)
+    assert not stats.size_files_without_plant
+
+
+def test_section_config_accepts_one_file_or_many():
+    """`file:` и `files:` в конфиге равноправны — старые конфиги работают."""
+    single = SectionConfig.from_dict({"file": "a.xlsx"})
+    many = SectionConfig.from_dict({"files": ["a.xlsx", "b.xlsx"]})
+    assert single.files == ["a.xlsx"]
+    assert single.file == "a.xlsx"
+    assert many.files == ["a.xlsx", "b.xlsx"]
+    assert many.file == "a.xlsx", "«первый файл» нужен коду, которому хватает одного"
+
+    # Присваивание .file остаётся рабочим — им пользуются тесты и diagnose.
+    single.file = "c.xlsx"
+    assert single.files == ["c.xlsx"]
+    single.file = None
+    assert single.files == []
+
+
 def test_schema_names_have_one_case(full_db):
     """Одна схема — одна запись, а не «dbo» и «DBO» по отдельности.
 

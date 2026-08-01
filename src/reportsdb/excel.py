@@ -33,6 +33,23 @@ def read_sheet(path: Path, section: SectionConfig) -> pd.DataFrame:
     )
 
 
+def read_all(paths: list[Path], section: SectionConfig) -> pd.DataFrame:
+    """Читает все файлы секции в одну таблицу.
+
+    Файлы приходят по одному на завод, а завод указан колонками ТС и Завод
+    внутри файла, поэтому склейка безопасна: строки разных заводов остаются
+    разными строками. Заголовки у файлов могут слегка различаться (у кого-то
+    нет необязательной колонки) — недостающие колонки становятся пустыми,
+    а не роняют загрузку.
+    """
+    frames = [read_sheet(path, section) for path in paths]
+    if not frames:
+        return pd.DataFrame()
+    if len(frames) == 1:
+        return frames[0]
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
 def list_sheets(path: Path) -> list[str]:
     if path.suffix.lower() in {".csv", ".tsv", ".txt"}:
         return ["(csv)"]

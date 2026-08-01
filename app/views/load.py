@@ -20,12 +20,11 @@ from _shared import DB_PATH, db_schema_version, page_setup, release_db
 
 from reportsdb.config import RAW_DIR, SCHEMA_VERSION, load_mapping, resolve_columns
 from reportsdb.etl import build
-from reportsdb.excel import list_sheets, read_sheet
+from reportsdb.excel import list_sheets, read_all
 
 page_setup("Загрузка данных", "📥")
 
 SUFFIXES = {".xlsx", ".xls", ".xlsm", ".csv", ".tsv"}
-NO_FILE = "— не загружать —"
 
 # Что означает каждое поле модели и что сломается без него. Группы совпадают со
 # смысловыми блоками исходного файла, чтобы таблицу проверки было легко читать.
@@ -218,37 +217,56 @@ if not files:
 
 st.subheader("Шаг 2. Что чем является")
 
+st.caption(
+    "Файлов на каждую роль может быть несколько — например, по одному на "
+    "завод. Они будут склеены и загружены за один проход, а завод у каждой "
+    "строки возьмётся из колонок **ТС** и **Завод** внутри файла."
+)
+
 col1, col2, col3 = st.columns(3)
-reports_file = col1.selectbox(
+reports_files = col1.multiselect(
     "Отчёты (обязательно)", files,
+    default=files[:1] if len(files) == 1 else [],
     help="Строка на отчёт: №, ТС, завод, каталог тремя уровнями, наименование, "
          "признак view, таблицы-источники, средняя длительность, число обращений.",
 )
-sizes_file = col2.selectbox(
-    "Размеры таблиц", [NO_FILE] + files,
-    help="Выгрузка сегментов БД: OWNER, SEGMENT_NAME, SEGMENT_TYPE, SIZE_MB, "
-         "PERCENT_OF_TOTAL. Строка на сегмент, а не на таблицу.",
+sizes_files = col2.multiselect(
+    "Размеры таблиц", files,
+    help="Выгрузка сегментов БД: ТС, Завод, OWNER, SEGMENT_NAME, SEGMENT_TYPE, "
+         "SIZE_MB, PERCENT_OF_TOTAL. Строка на сегмент, а не на таблицу.",
 )
-usage_file = col3.selectbox(
-    "Статистика отдельным файлом", [NO_FILE] + files,
+usage_files = col3.multiselect(
+    "Статистика отдельным файлом", files,
     help="Обычно не нужен: обращения и длительность уже есть в основном файле. "
          "Если выбран — его значения перекроют данные основного файла.",
 )
 
+if not reports_files:
+    st.info("Выберите хотя бы один файл отчётов.")
+    st.stop()
+
 mapping = load_mapping()
 
-# Лист книги выбирается явно, если листов несколько.
-sheets = list_sheets(RAW_DIR / reports_file)
+# Лист книги выбирается явно, если листов несколько. Выбор применяется ко всем
+# файлам отчётов сразу: выгрузки по заводам делает один и тот же отчёт, листы
+# у них называются одинаково.
+sheets = list_sheets(RAW_DIR / reports_files[0])
 if len(sheets) > 1:
     mapping.reports.sheet = st.selectbox("Лист с отчётами", sheets)
-    st.caption(f"В книге {len(sheets)} листов — выберите нужный.")
+    st.caption(
+        f"В книге {len(sheets)} листов — выберите нужный. "
+        "Выбор применяется ко всем файлам отчётов."
+    )
 
 # --- Шаг 3: проверка колонок всех выбранных файлов -------------------------
 
 st.subheader("Шаг 3. Проверка колонок")
 
 try:
-    preview = read_sheet(RAW_DIR / reports_file, mapping.reports)
+    # Проверка колонок идёт по склейке всех файлов роли — ровно по тому, что
+    # получит загрузчик. Если в одном из файлов колонки нет, в склейке она
+    # окажется пустой, и это видно здесь, а не после загрузки.
+    preview = read_all([RAW_DIR / f for f in reports_files], mapping.reports)
 except Exception as exc:  # noqa: BLE001 — показываем причину пользователю
     st.error(f"Не удалось прочитать файл:\n\n```\n{exc}\n```")
     st.stop()
@@ -256,9 +274,9 @@ except Exception as exc:  # noqa: BLE001 — показываем причину
 resolved = resolve_columns(list(preview.columns), mapping.reports.columns)
 
 tab_names = ["Отчёты"]
-if sizes_file != NO_FILE:
+if sizes_files:
     tab_names.append("Размеры таблиц")
-if usage_file != NO_FILE:
+if usage_files:
     tab_names.append("Статистика")
 tabs = st.tabs(tab_names)
 
@@ -266,14 +284,17 @@ all_losses: list[str] = []
 
 with tabs[0]:
     all_losses += show_mapping("Файл отчётов", resolved, REPORT_FIELDS)
-    with st.expander(f"Первые строки файла (всего {len(preview)})"):
+    if len(reports_files) > 1:
+        st.caption(f"Склеено файлов: {len(reports_files)}.")
+    with st.expander(f"Первые строки (всего {len(preview)})"):
         st.dataframe(preview.head(10), use_container_width=True, hide_index=True)
 
 index = 1
-if sizes_file != NO_FILE:
+if sizes_files:
     with tabs[index]:
         try:
-            sizes_preview = read_sheet(RAW_DIR / sizes_file, mapping.table_sizes)
+            sizes_preview = read_all(
+                [RAW_DIR / f for f in sizes_files], mapping.table_sizes)
         except Exception as exc:  # noqa: BLE001
             st.error(f"Не удалось прочитать файл размеров:\n\n```\n{exc}\n```")
             st.stop()
@@ -298,14 +319,29 @@ if sizes_file != NO_FILE:
         else:
             allowed = ", ".join(mapping.table_sizes.segment_types)
             st.caption(f"В размер таблицы войдут только сегменты типов: {allowed}.")
-        with st.expander(f"Первые строки файла (всего {len(sizes_preview)})"):
+
+        # Несколько файлов без колонки завода — молча неверные цифры: строки
+        # всех заводов лягут в «(не указан)» и сложатся в один размер.
+        if len(sizes_files) > 1 and not sizes_resolved.get("plant"):
+            st.error(
+                f"Выбрано файлов размеров: {len(sizes_files)}, а колонки "
+                "**«Завод»** в них нет. Размеры разных заводов сложатся в один "
+                "и ошибки при этом не будет — цифры просто окажутся неверными."
+                "\n\n**Что сделать:** добавьте в выгрузку колонки ТС и Завод "
+                "либо загружайте по одному файлу за раз."
+            )
+        elif len(sizes_files) > 1:
+            st.caption(f"Склеено файлов: {len(sizes_files)}.")
+
+        with st.expander(f"Первые строки (всего {len(sizes_preview)})"):
             st.dataframe(sizes_preview.head(10), use_container_width=True, hide_index=True)
     index += 1
 
-if usage_file != NO_FILE:
+if usage_files:
     with tabs[index]:
         try:
-            usage_preview = read_sheet(RAW_DIR / usage_file, mapping.report_usage)
+            usage_preview = read_all(
+                [RAW_DIR / f for f in usage_files], mapping.report_usage)
         except Exception as exc:  # noqa: BLE001
             st.error(f"Не удалось прочитать файл статистики:\n\n```\n{exc}\n```")
             st.stop()
@@ -323,7 +359,9 @@ if usage_file != NO_FILE:
             "Значения из этого файла **перекроют** обращения и длительность из "
             "основного файла: он считается более свежим источником."
         )
-        with st.expander(f"Первые строки файла (всего {len(usage_preview)})"):
+        if len(usage_files) > 1:
+            st.caption(f"Склеено файлов: {len(usage_files)}.")
+        with st.expander(f"Первые строки (всего {len(usage_preview)})"):
             st.dataframe(usage_preview.head(10), use_container_width=True, hide_index=True)
 
 # Блокирующая проверка — только имя отчёта.
@@ -357,14 +395,14 @@ st.caption(
 )
 
 if st.button("Загрузить", type="primary", use_container_width=True):
-    mapping.table_sizes.file = None if sizes_file == NO_FILE else sizes_file
-    mapping.report_usage.file = None if usage_file == NO_FILE else usage_file
+    mapping.table_sizes.files = list(sizes_files)
+    mapping.report_usage.files = list(usage_files)
 
     release_db()  # отпускаем файл БД до пересборки
 
     try:
         with st.spinner("Читаю файлы и собираю базу…"):
-            stats = build(RAW_DIR / reports_file, DB_PATH, mapping)
+            stats = build([RAW_DIR / f for f in reports_files], DB_PATH, mapping)
     except SystemExit as exc:  # ETL сообщает об ошибках через SystemExit
         st.error(f"Загрузка прервана:\n\n```\n{exc}\n```")
         st.stop()

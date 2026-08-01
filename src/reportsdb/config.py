@@ -28,9 +28,15 @@ UNKNOWN_SCHEMA = "(unknown)"
 
 @dataclass
 class SectionConfig:
-    """Настройки чтения одного листа Excel."""
+    """Настройки чтения одного листа Excel.
 
-    file: str | None = None
+    Файлов может быть несколько: данные приходят по файлу на завод, и все они
+    грузятся за один проход. Завод берётся из колонок ТС и Завод внутри файла,
+    а не из того, какой это файл, — иначе размеры разных заводов молча
+    сложились бы в один.
+    """
+
+    files: list[str] = field(default_factory=list)
     sheet: str | int | None = None
     header_row: int = 0
     columns: dict[str, list[str]] = field(default_factory=dict)
@@ -41,6 +47,15 @@ class SectionConfig:
     # Типы сегментов, которые считаются объёмом таблицы (см. mapping.yml).
     segment_types: list[str] = field(default_factory=list)
 
+    @property
+    def file(self) -> str | None:
+        """Первый файл секции — для кода, которому нужен ровно один."""
+        return self.files[0] if self.files else None
+
+    @file.setter
+    def file(self, value: str | None) -> None:
+        self.files = [value] if value else []
+
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "SectionConfig":
         raw = raw or {}
@@ -48,8 +63,13 @@ class SectionConfig:
             key: [str(v) for v in (value or [])]
             for key, value in (raw.get("columns") or {}).items()
         }
+        # В конфиге допустимы оба вида: `file: одинфайл.xlsx` и
+        # `files: [первый.xlsx, второй.xlsx]`. Первый оставлен, чтобы старые
+        # конфиги продолжали работать без правок.
+        one = raw.get("file")
+        many = raw.get("files") or ([one] if one else [])
         return cls(
-            file=raw.get("file"),
+            files=[str(f) for f in many if f],
             sheet=raw.get("sheet"),
             header_row=int(raw.get("header_row") or 0),
             columns=columns,

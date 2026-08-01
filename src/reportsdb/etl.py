@@ -22,7 +22,7 @@ from .config import (
     load_mapping,
     resolve_columns,
 )
-from .excel import read_sheet
+from .excel import read_all, read_sheet
 from .normalize import (
     clean_text,
     full_name_key,
@@ -61,6 +61,9 @@ class LoadStats:
     rows_read: int = 0
     rows_loaded: int = 0
     rows_rejected: int = 0
+    # Сколько файлов отчётов склеено в эту загрузку (по файлу на завод).
+    source_files: int = 1
+    size_files: int = 0
     tables: int = 0
     links: int = 0
     unparsed_refs: int = 0
@@ -76,6 +79,9 @@ class LoadStats:
     segment_type_column_missing: bool = False
     # Колонка есть, но ячейка пуста: строка засчитана как таблица.
     segments_without_type: int = 0
+    # Файлов размеров несколько, а колонки завода нет — размеры заводов
+    # сложатся в один и никакой ошибки при этом не будет.
+    size_files_without_plant: bool = False
     usage_loaded: int = 0
     usage_unmatched: list[str] = field(default_factory=list)
 
@@ -88,6 +94,15 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _sha256_all(paths: list[Path]) -> str:
+    """Общий слепок набора файлов — по именам и содержимому, в порядке имён."""
+    digest = hashlib.sha256()
+    for path in sorted(paths, key=lambda p: p.name):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(_sha256(path).encode("ascii"))
+    return digest.hexdigest()
+
+
 def _run_sql_file(con: duckdb.DuckDBPyConnection, path: Path) -> None:
     con.execute(path.read_text(encoding="utf-8"))
 
@@ -97,12 +112,20 @@ def _cell(row: pd.Series, column: str | None):
 
 
 def build(
-    source: Path,
+    source: Path | list[Path],
     db_path: Path = DB_PATH,
     mapping: Mapping | None = None,
 ) -> LoadStats:
-    """Пересобирает БД с нуля из исходного файла."""
+    """Пересобирает БД с нуля из исходных файлов.
+
+    `source` — файл отчётов или список файлов: данные приходят по файлу на
+    завод. Пересборка всегда полная: одна загрузка = вся база из перечисленных
+    файлов, никакого состояния «половина заводов свежая, половина старая».
+    """
     mapping = mapping or load_mapping()
+    sources = [source] if isinstance(source, Path) else list(source)
+    if not sources:
+        raise SystemExit("Не указан ни один файл отчётов.")
     stats = LoadStats()
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,7 +142,7 @@ def build(
     con = duckdb.connect(str(db_path))
     try:
         _run_sql_file(con, SQL_DIR / "01_schema.sql")
-        _load_reports(con, source, mapping.reports, stats, schema_index)
+        _load_reports(con, sources, mapping.reports, stats, schema_index)
         _load_table_sizes(con, mapping.table_sizes, stats)
         _load_report_usage(con, mapping.report_usage, stats)
         _run_sql_file(con, SQL_DIR / "02_views.sql")
@@ -133,8 +156,9 @@ def build(
             """,
             [
                 datetime.now(),
-                source.name,
-                _sha256(source),
+                ", ".join(p.name for p in sources),
+                # Слепок всех файлов сразу: подмена любого из них меняет его.
+                _sha256_all(sources),
                 stats.rows_read,
                 stats.rows_loaded,
                 stats.rows_rejected,
@@ -155,16 +179,22 @@ def _schema_recovery_index(section: SectionConfig) -> dict[str, str]:
     же имя таблицы встречается под разными схемами (например, «Orders» есть
     и в dbo, и в sales), восстановить схему нельзя — такое имя в индекс не
     попадает, и ссылка на него в отчёте останется «(unknown)».
+
+    Индекс строится сразу по всем файлам размеров: имя, однозначное в одном
+    файле, но встречающееся под другой схемой в файле соседнего завода, —
+    неоднозначно, и схему по нему восстанавливать нельзя.
     """
-    if not section.file:
-        return {}
-    path = Path(section.file)
-    if not path.is_absolute():
-        path = RAW_DIR / path
-    if not path.exists():
+    paths = []
+    for name in section.files:
+        path = Path(name)
+        if not path.is_absolute():
+            path = RAW_DIR / path
+        if path.exists():
+            paths.append(path)
+    if not paths:
         return {}
 
-    df = read_sheet(path, section)
+    df = read_all(paths, section)
     cols = resolve_columns(list(df.columns), section.columns)
 
     candidates: dict[str, set[str]] = {}
@@ -191,14 +221,19 @@ def _schema_recovery_index(section: SectionConfig) -> dict[str, str]:
 
 def _load_reports(
     con: duckdb.DuckDBPyConnection,
-    source: Path,
+    source: Path | list[Path],
     section: SectionConfig,
     stats: LoadStats,
     schema_index: dict[str, str] | None = None,
 ) -> None:
     schema_index = schema_index or {}
-    df = read_sheet(source, section)
+    sources = [source] if isinstance(source, Path) else list(source)
+    # Файлы склеиваются до разбора, а не грузятся по очереди: сквозная
+    # нумерация report_id и table_id ведётся по всему набору, и загрузка
+    # файлов по одному выдавала бы одинаковые ключи для разных строк.
+    df = read_all(sources, section)
     stats.rows_read = len(df)
+    stats.source_files = len(sources)
 
     cols = resolve_columns(list(df.columns), section.columns)
     if not cols.get("report_name"):
@@ -374,12 +409,18 @@ def _load_table_sizes(
 
     Ключ размера — «таблица + сеть + завод»: одна и та же таблица на разных
     заводах занимает разное место.
+
+    Файлов может быть несколько — по одному на завод. Они складываются в один
+    накопитель по ключу «таблица + сеть + завод», поэтому строки разных заводов
+    остаются раздельными, а повтор одной таблицы (секции) суммируется, как и
+    внутри одного файла.
     """
-    path = _section_file(section)
-    if path is None:
+    paths = _section_files(section)
+    if not paths:
         return
 
-    df = read_sheet(path, section)
+    stats.size_files = len(paths)
+    df = read_all(paths, section)
     cols = resolve_columns(list(df.columns), section.columns)
 
     known = {
@@ -399,6 +440,12 @@ def _load_table_sizes(
     # этого делать нельзя — предупреждаем в сводке загрузки.
     if allowed and not cols.get("segment_type"):
         stats.segment_type_column_missing = True
+
+    # Несколько файлов размеров без колонки завода — это молча неверные цифры:
+    # все строки лягут в «(не указан)», и размеры разных заводов сложатся в
+    # один. Падения не будет, поэтому предупреждаем явно.
+    if len(paths) > 1 and not cols.get("plant"):
+        stats.size_files_without_plant = True
 
     for _, row in df.iterrows():
         segment_type = clean_text(_cell(row, cols.get("segment_type")))
@@ -520,11 +567,11 @@ def _accumulate(entry: dict, key: str, value: float | None) -> None:
 def _load_report_usage(
     con: duckdb.DuckDBPyConnection, section: SectionConfig, stats: LoadStats
 ) -> None:
-    path = _section_file(section)
-    if path is None:
+    paths = _section_files(section)
+    if not paths:
         return
 
-    df = read_sheet(path, section)
+    df = read_all(paths, section)
     cols = resolve_columns(list(df.columns), section.columns)
     if not cols.get("report_name"):
         raise SystemExit("В файле частоты использования нет колонки с именем отчёта.")
@@ -614,14 +661,23 @@ def _duration_sec(row: pd.Series, cols: dict[str, str | None]) -> float | None:
 
 
 def _section_file(section: SectionConfig) -> Path | None:
-    if not section.file:
-        return None
-    path = Path(section.file)
-    if not path.is_absolute():
-        path = RAW_DIR / path
-    if not path.exists():
-        raise SystemExit(f"Файл из config/mapping.yml не найден: {path}")
-    return path
+    files = _section_files(section)
+    return files[0] if files else None
+
+
+def _section_files(section: SectionConfig) -> list[Path]:
+    """Все файлы секции. Пути из конфига считаются от data/raw/."""
+    resolved = []
+    for name in section.files:
+        path = Path(name)
+        if not path.is_absolute():
+            path = RAW_DIR / path
+        if not path.exists():
+            raise SystemExit(f"Файл из config/mapping.yml не найден: {path}")
+        resolved.append(path)
+    return resolved
+
+
 
 
 def _as_int(value: float | None) -> int | None:
@@ -648,6 +704,8 @@ def _insert(
 
 def print_summary(stats: LoadStats) -> None:
     print("\nЗагрузка завершена:")
+    if stats.source_files > 1:
+        print(f"  файлов отчётов  : {stats.source_files}")
     print(f"  строк прочитано : {stats.rows_read}")
     print(f"  отчётов загружено: {stats.rows_loaded}")
     print(f"  строк отброшено  : {stats.rows_rejected}")
@@ -662,7 +720,13 @@ def print_summary(stats: LoadStats) -> None:
     if stats.unparsed_refs:
         print(f"  !  ссылок без схемы: {stats.unparsed_refs} (схема = '(unknown)')")
     if stats.sizes_loaded:
+        if stats.size_files > 1:
+            print(f"  файлов размеров  : {stats.size_files}")
         print(f"  строк размеров   : {stats.sizes_loaded}")
+        if stats.size_files_without_plant:
+            print("  !  файлов размеров несколько, а колонки «Завод» нет —")
+            print("     размеры разных заводов сложились в один. Добавьте")
+            print("     колонки ТС и Завод в выгрузку и загрузите заново.")
         if stats.size_plants > 1:
             print(f"     заводов в файле размеров: {stats.size_plants}")
         if stats.tables_only_in_sizes:
