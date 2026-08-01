@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import streamlit as st
 
+from _shared import inject_theme
+
 st.set_page_config(
     page_title="ReportsDB — аналитика отчётности",
     page_icon="🗂️",
     layout="wide",
 )
+inject_theme()
 
 NAV = {
     "Данные": [

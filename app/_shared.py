@@ -33,6 +33,66 @@ FOOTPRINT_HINT = (
 )
 
 
+# Единый вид интерфейса: карточки-показатели, мягкие рамки таблиц, спокойные
+# заголовки меню. Все цвета — оттенком поверх текущего фона (rgba, не hex),
+# поэтому выглядит одинаково в светлой и тёмной теме, не только в одной из
+# них. Селекторы сверены с фактическим DOM Streamlit 1.60 через Playwright —
+# data-testid у Streamlit не документированы и меняются между версиями.
+_THEME_CSS = """
+<style>
+h1 {
+    letter-spacing: -0.01em;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+    margin-bottom: 1.4rem !important;
+}
+
+div[data-testid="stMetric"] {
+    background: rgba(127, 127, 127, 0.055);
+    border: 1px solid rgba(127, 127, 127, 0.13);
+    border-radius: 10px;
+    padding: 0.85rem 1.1rem 0.65rem;
+}
+label[data-testid="stMetricLabel"] p {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.68;
+}
+div[data-testid="stMetricValue"] { font-weight: 650; }
+
+div[data-testid="stDataFrame"], div[data-testid="stDataFrameResizable"] {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(127, 127, 127, 0.16);
+}
+
+/* Не трогает строки-таблицы row_picker — та стилизация специфичнее и не
+   перебивается этой. */
+button[data-testid^="stBaseButton"] {
+    border-radius: 8px;
+    transition: background-color 120ms ease, border-color 120ms ease,
+                box-shadow 120ms ease;
+}
+
+hr { opacity: 0.4; }
+
+[data-testid="stNavSectionHeader"] p {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.55;
+    font-weight: 600;
+}
+</style>
+"""
+
+
+def inject_theme() -> None:
+    """Единый вид приложения — вызывается один раз, из Home.py."""
+    st.markdown(_THEME_CSS, unsafe_allow_html=True)
+
+
 def page_setup(title: str, icon: str = "📊") -> None:
     """Заголовок страницы. set_page_config вызывается один раз в Home.py."""
     st.title(f"{icon} {title}" if icon else title)
