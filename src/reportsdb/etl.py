@@ -50,6 +50,11 @@ SOURCE_COLUMNS = [
 # Чем выше приоритет, тем надёжнее источник типа объекта.
 KIND_PRIORITY = {"по умолчанию": 0, "маска": 1, "колонка": 2}
 
+# Чем выше приоритет, тем надёжнее источник схемы. «Ссылка» — схема была в
+# исходном тексте, «файл размеров» — восстановлена по уникальному совпадению
+# имени, «не определена» — взять неоткуда.
+SCHEMA_PRIORITY = {"не определена": 0, "файл размеров": 1, "ссылка": 2}
+
 
 @dataclass
 class LoadStats:
@@ -59,6 +64,9 @@ class LoadStats:
     tables: int = 0
     links: int = 0
     unparsed_refs: int = 0
+    # Ссылка была без схемы, но схема нашлась по уникальному совпадению имени
+    # в файле размеров — там перечислены все таблицы БД независимо от отчётов.
+    schema_recovered_tables: int = 0
     segments_skipped: int = 0
     objects_by_kind: dict[str, int] = field(default_factory=dict)
     sizes_loaded: int = 0
@@ -101,10 +109,17 @@ def build(
     if db_path.exists():
         shutil.move(str(db_path), str(db_path.with_suffix(db_path.suffix + ".bak")))
 
+    # Список таблиц БД существует независимо от отчётов (файл размеров
+    # содержит все таблицы), поэтому по нему можно восстановить схему для
+    # ссылок отчётов, где схема не указана. Индекс строится до загрузки
+    # отчётов — файл читается отдельно от основного прохода _load_table_sizes,
+    # чтобы не завязывать один шаг на внутреннее устройство другого.
+    schema_index = _schema_recovery_index(mapping.table_sizes)
+
     con = duckdb.connect(str(db_path))
     try:
         _run_sql_file(con, SQL_DIR / "01_schema.sql")
-        _load_reports(con, source, mapping.reports, stats)
+        _load_reports(con, source, mapping.reports, stats, schema_index)
         _load_table_sizes(con, mapping.table_sizes, stats)
         _load_report_usage(con, mapping.report_usage, stats)
         _run_sql_file(con, SQL_DIR / "02_views.sql")
@@ -132,12 +147,56 @@ def build(
     return stats
 
 
+def _schema_recovery_index(section: SectionConfig) -> dict[str, str]:
+    """Имя таблицы (в нижнем регистре) → её схема, если она единственная.
+
+    Строится из файла размеров: там перечислены все таблицы БД со схемами,
+    независимо от того, ссылается ли на них хоть один отчёт. Если одно и то
+    же имя таблицы встречается под разными схемами (например, «Orders» есть
+    и в dbo, и в sales), восстановить схему нельзя — такое имя в индекс не
+    попадает, и ссылка на него в отчёте останется «(unknown)».
+    """
+    if not section.file:
+        return {}
+    path = Path(section.file)
+    if not path.is_absolute():
+        path = RAW_DIR / path
+    if not path.exists():
+        return {}
+
+    df = read_sheet(path, section)
+    cols = resolve_columns(list(df.columns), section.columns)
+
+    candidates: dict[str, set[str]] = {}
+    for _, row in df.iterrows():
+        full = clean_text(_cell(row, cols.get("full_name")))
+        schema_name = clean_text(_cell(row, cols.get("schema_name")))
+        table_name = clean_text(_cell(row, cols.get("table_name")))
+        if full is None:
+            if not table_name:
+                continue
+            full = f"{schema_name}.{table_name}" if schema_name else table_name
+
+        parsed = parse_table_ref(full)
+        if parsed is None:
+            continue
+        obj_schema, obj_name, parsed_ok = parsed
+        if not parsed_ok:
+            continue  # сама запись в файле размеров без схемы — не источник
+        candidates.setdefault(obj_name.lower(), set()).add(obj_schema.lower())
+
+    return {name: next(iter(schemas)) for name, schemas in candidates.items()
+            if len(schemas) == 1}
+
+
 def _load_reports(
     con: duckdb.DuckDBPyConnection,
     source: Path,
     section: SectionConfig,
     stats: LoadStats,
+    schema_index: dict[str, str] | None = None,
 ) -> None:
+    schema_index = schema_index or {}
     df = read_sheet(source, section)
     stats.rows_read = len(df)
 
@@ -235,17 +294,36 @@ def _load_reports(
                 else:
                     obj_kind, origin = kind, "колонка"
 
+                # Схемы в тексте не было — ищем её по имени таблицы в файле
+                # размеров. Совпадение засчитывается, только если оно
+                # единственное: неоднозначную догадку выдавать за факт нельзя.
+                schema_source = "ссылка"
+                if not ok:
+                    recovered = schema_index.get(table_name.lower())
+                    if recovered:
+                        schema_name, schema_source = recovered, "файл размеров"
+                    else:
+                        schema_source = "не определена"
+
                 fkey = full_name_key(schema_name, table_name)
                 existing = tables.get(fkey)
                 if existing is None:
                     tables[fkey] = [
-                        len(tables) + 1, schema_name, table_name, ok, obj_kind, origin
+                        len(tables) + 1, schema_name, table_name, obj_kind, origin,
+                        schema_source,
                     ]
-                    if not ok:
+                    if schema_source == "не определена":
                         stats.unparsed_refs += 1
-                elif KIND_PRIORITY[origin] > KIND_PRIORITY[existing[5]]:
-                    existing[4], existing[5] = obj_kind, origin
+                else:
+                    if KIND_PRIORITY[origin] > KIND_PRIORITY[existing[4]]:
+                        existing[3], existing[4] = obj_kind, origin
+                    if SCHEMA_PRIORITY[schema_source] > SCHEMA_PRIORITY[existing[5]]:
+                        existing[5] = schema_source
                 links.add((report_id, tables[fkey][0]))
+
+    stats.schema_recovered_tables = sum(
+        1 for entry in tables.values() if entry[5] == "файл размеров"
+    )
 
     _insert(
         con,
@@ -269,11 +347,12 @@ def _load_reports(
         # приходит как «dbo», из выгрузки сегментов как «DBO»; без приведения
         # одна и та же схема двоилась бы в сводках и фильтрах.
         [
-            (tid, schema.lower(), name, key, kind, origin, ok)
-            for key, (tid, schema, name, ok, kind, origin) in tables.items()
+            (tid, schema.lower(), name, key, kind, origin, source,
+             source != "не определена")
+            for key, (tid, schema, name, kind, origin, source) in tables.items()
         ],
         ["table_id", "schema_name", "table_name", "full_name", "object_kind",
-         "kind_source", "is_parsed_ok"],
+         "kind_source", "schema_source", "is_parsed_ok"],
     )
     _insert(con, "bridge_report_table", sorted(links), ["report_id", "table_id"])
     _insert(con, "etl_reject", rejects, ["run_id", "source_row", "reason", "payload"])
@@ -356,8 +435,11 @@ def _load_table_sizes(
             new_objects.append(
                 # Схема в нижнем регистре — см. загрузку отчётов: иначе «DBO»
                 # из выгрузки сегментов и «dbo» из отчётов станут двумя схемами.
+                # schema_source описывает эту же строку файла размеров, а не
+                # восстановление: «ссылка», если в ней была своя схема.
                 (table_id, obj_schema.lower(), obj_name, key, "TABLE",
-                 "файл размеров", parsed_ok)
+                 "файл размеров", "ссылка" if parsed_ok else "не определена",
+                 parsed_ok)
             )
             stats.tables_only_in_sizes += 1
 
@@ -394,7 +476,7 @@ def _load_table_sizes(
         "dim_table",
         new_objects,
         ["table_id", "schema_name", "table_name", "full_name", "object_kind",
-         "kind_source", "is_parsed_ok"],
+         "kind_source", "schema_source", "is_parsed_ok"],
     )
 
     rows_out = [
@@ -574,6 +656,9 @@ def print_summary(stats: LoadStats) -> None:
         parts = ", ".join(f"{k}: {v}" for k, v in sorted(stats.objects_by_kind.items()))
         print(f"     по типам        : {parts}")
     print(f"  связей отчёт↔таблица: {stats.links}")
+    if stats.schema_recovered_tables:
+        print(f"     восстановлено схем по файлу размеров: "
+              f"{stats.schema_recovered_tables}")
     if stats.unparsed_refs:
         print(f"  !  ссылок без схемы: {stats.unparsed_refs} (схема = '(unknown)')")
     if stats.sizes_loaded:

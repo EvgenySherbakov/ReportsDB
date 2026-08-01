@@ -55,11 +55,18 @@ if not top.empty:
     st.plotly_chart(fig, use_container_width=True)
     st.caption("Изменение схемы этих таблиц затронет наибольшее число отчётов.")
 
+recovered = int((view["schema_source"] == "файл размеров").sum())
+if recovered:
+    st.caption(
+        f"Восстановлено схем по уникальному совпадению имени в файле "
+        f"размеров: {recovered}. Отмечены в столбце «Схема определена»."
+    )
+
 shown = show_table(
     view.sort_values(["report_count", "total_mb"], ascending=False)[
-        ["full_name", "schema_name", "object_kind", "report_count", "total_mb",
-         "percent_of_total", "retention_days", "row_count", "segment_count",
-         "is_orphan", "reports"]
+        ["full_name", "schema_name", "object_kind", "schema_source", "report_count",
+         "total_mb", "percent_of_total", "retention_days", "row_count",
+         "segment_count", "is_orphan", "reports"]
     ],
     {
         "reports": st.column_config.TextColumn("Зависимые отчёты", width="large"),

@@ -389,10 +389,19 @@ if st.button("Загрузить", type="primary", use_container_width=True):
 
     if stats.rows_rejected:
         st.warning(f"Отброшено строк: {stats.rows_rejected} — см. ниже.")
+    if stats.schema_recovered_tables:
+        st.success(
+            f"Восстановлено схем по файлу размеров: {stats.schema_recovered_tables}. "
+            "В отчёте таблица была указана без схемы, но её имя встречается в "
+            "файле размеров ровно с одной схемой — она и присвоена. "
+            "Отмечено в справочнике «Таблицы» столбцом «Схема определена»."
+        )
     if stats.unparsed_refs:
         st.warning(
-            f"Ссылок на таблицы без схемы: {stats.unparsed_refs}. "
-            "Схема таких таблиц записана как «(unknown)»."
+            f"Ссылок на таблицы без схемы: {stats.unparsed_refs}. Восстановить "
+            "не удалось: либо такого имени нет в файле размеров, либо оно "
+            "встречается там сразу под несколькими схемами. Схема записана как "
+            "«(unknown)»."
         )
     if stats.segments_skipped:
         st.info(

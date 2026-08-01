@@ -148,7 +148,13 @@ with q2:
     unparsed = query(
         "SELECT full_name, table_name FROM dim_table WHERE NOT is_parsed_ok ORDER BY 1"
     )
-    st.caption(f"Ссылок на таблицы без схемы: **{len(unparsed)}**")
+    recovered = query(
+        "SELECT COUNT(*) AS n FROM dim_table WHERE schema_source = 'файл размеров'"
+    )["n"].iloc[0]
+    caption = f"Ссылок на таблицы без схемы: **{len(unparsed)}**"
+    if recovered:
+        caption += f" (ещё {recovered} восстановлено по файлу размеров)"
+    st.caption(caption)
     if not unparsed.empty:
         show_table(unparsed, {"full_name": "Таблица", "table_name": "Имя таблицы"}, height=200)
 

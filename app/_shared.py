@@ -158,6 +158,7 @@ LABELS = {
     "total_mb": "Объём, МБ",
     "is_orphan": "Сирота",
     "is_parsed_ok": "Схема распознана",
+    "schema_source": "Схема определена",
     "reports": "Зависимые отчёты",
 }
 

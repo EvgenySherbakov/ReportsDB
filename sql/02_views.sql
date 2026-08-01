@@ -93,6 +93,7 @@ SELECT
     t.table_name,
     t.object_kind,
     t.kind_source,
+    t.schema_source,
     t.is_parsed_ok,
     COUNT(DISTINCT b.report_id)                    AS report_count,
     (COUNT(DISTINCT b.report_id) = 0)              AS is_orphan,
@@ -119,8 +120,9 @@ LEFT JOIN (
     FROM fact_table_size GROUP BY table_id
 ) sz ON sz.table_id = t.table_id
 GROUP BY t.table_id, t.full_name, t.schema_name, t.table_name, t.object_kind,
-         t.kind_source, t.is_parsed_ok, sz.total_mb, sz.percent_of_total,
-         sz.segment_count, sz.retention_days, sz.row_count, sz.plant_count;
+         t.kind_source, t.schema_source, t.is_parsed_ok, sz.total_mb,
+         sz.percent_of_total, sz.segment_count, sz.retention_days, sz.row_count,
+         sz.plant_count;
 
 -- 5.3. Стоимость против ценности -----------------------------------------
 CREATE VIEW v_report_cost_value AS
@@ -279,11 +281,16 @@ FROM v_report_cost_value
 ORDER BY total_duration_sec DESC NULLS LAST;
 
 -- 5.6. Пересечение отчётов по набору источников ---------------------------
+-- Только настоящие таблицы — как и везде, где речь о наборе таблиц отчёта.
+-- Пара исключается, если это один и тот же отчёт на разных заводах (общие
+-- имя и каталог): такая пара похожа на 100%, но объединять там нечего.
 CREATE VIEW v_report_overlap AS
 WITH cnt AS (
-    SELECT report_id, COUNT(*) AS n
-    FROM bridge_report_table
-    GROUP BY report_id
+    SELECT b.report_id, COUNT(*) AS n
+    FROM bridge_report_table b
+    JOIN dim_table t ON t.table_id = b.table_id
+    WHERE t.object_kind = 'TABLE'
+    GROUP BY b.report_id
     HAVING COUNT(*) >= 2
 ),
 pairs AS (
@@ -292,6 +299,8 @@ pairs AS (
     JOIN bridge_report_table b
       ON a.table_id = b.table_id
      AND a.report_id < b.report_id
+    JOIN dim_table t ON t.table_id = a.table_id
+    WHERE t.object_kind = 'TABLE'
     GROUP BY 1, 2
 )
 SELECT
@@ -307,6 +316,7 @@ JOIN cnt c2        ON c2.report_id = p.report_id_2
 JOIN dim_report r1 ON r1.report_id = p.report_id_1
 JOIN dim_report r2 ON r2.report_id = p.report_id_2
 WHERE p.shared_tables::DOUBLE / (c1.n + c2.n - p.shared_tables) >= 0.8
+  AND NOT (r1.report_name = r2.report_name AND r1.catalog_path = r2.catalog_path)
 ORDER BY jaccard DESC, p.shared_tables DESC;
 
 

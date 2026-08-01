@@ -102,6 +102,14 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
             picked.append("TempStaging")
         if i % 29 == 0 and picked:
             picked[-1] = f"ReportDW.{picked[-1]}"
+        # Без схемы, но имя однозначно определяет схему по файлу размеров:
+        # «STANDALONE_1» существует только в dbo — проверка восстановления.
+        if i % 31 == 0:
+            picked.append("STANDALONE_1")
+        # Без схемы и неоднозначно: «Orders» есть во всех схемах сразу —
+        # проверка, что при нескольких кандидатах схема не угадывается.
+        if i % 37 == 0:
+            picked.append("Orders")
 
         l1, l2, l3 = rnd.choice(FOLDER_LEVELS)
         execs = 0 if rnd.random() < 0.22 else int(rnd.lognormvariate(3.2, 1.5))

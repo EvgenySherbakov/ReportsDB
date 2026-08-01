@@ -59,7 +59,8 @@ FIELDS_IN_ANALYTICS = [
     "exec_count", "avg_duration_sec", "total_duration_sec",
     "percent_of_total", "exclusive_pct_of_db", "segment_count",
     "total_mb", "schema_name", "table_name",
-    "object_kind", "kind_source", "retention_days", "retention_band", "usage_band",
+    "object_kind", "kind_source", "schema_source", "retention_days", "retention_band",
+    "usage_band",
     "tables_total_mb", "tables_exclusive_mb", "table_names",
 ]
 
@@ -251,6 +252,50 @@ def test_schema_names_have_one_case(full_db):
     assert total == lowered
 
 
+def test_schema_recovered_when_name_is_unique_in_sizes_file(full_db):
+    """Схема без указания в отчёте восстанавливается по файлу размеров.
+
+    Демо-данные ссылаются на «STANDALONE_1» без схемы; в файле размеров это
+    имя существует только в схеме dbo. Должна получиться ровно одна запись
+    dim_table с восстановленной схемой — а не дубль «(unknown).standalone_1»
+    рядом с «dbo.standalone_1» из файла размеров.
+    """
+    rows = full_db.execute(
+        "SELECT schema_name, schema_source, is_parsed_ok FROM dim_table "
+        "WHERE table_name ILIKE 'standalone_1'"
+    ).fetchall()
+    assert len(rows) == 1, "восстановленная и файловая запись должны быть одной строкой"
+    schema_name, schema_source, is_parsed_ok = rows[0]
+    assert schema_name == "dbo"
+    assert schema_source == "файл размеров"
+    assert is_parsed_ok is True
+
+
+def test_schema_not_guessed_when_name_is_ambiguous(full_db):
+    """Несколько схем с одним именем — восстанавливать нельзя, это догадка.
+
+    «Orders» в демо-данных существует сразу в нескольких схемах, поэтому
+    ссылка без схемы должна остаться «(unknown)», а не взять первую попавшуюся.
+    """
+    row = full_db.execute(
+        "SELECT schema_name, schema_source, is_parsed_ok FROM dim_table "
+        "WHERE table_name ILIKE 'orders' AND schema_name = '(unknown)'"
+    ).fetchone()
+    assert row is not None, "в демо-данных есть ссылка на «Orders» без схемы"
+    _, schema_source, is_parsed_ok = row
+    assert schema_source == "не определена"
+    assert is_parsed_ok is False
+
+
+def test_is_parsed_ok_matches_schema_source(full_db):
+    """is_parsed_ok — производная от schema_source, они не должны разойтись."""
+    mismatched = full_db.execute(
+        "SELECT COUNT(*) FROM dim_table "
+        "WHERE is_parsed_ok <> (schema_source <> 'не определена')"
+    ).fetchone()[0]
+    assert mismatched == 0
+
+
 def test_missing_segment_type_column_is_reported(paths, tmp_path_factory):
     """Без колонки типа индексы не отфильтровать — загрузка обязана сказать это.
 
@@ -377,8 +422,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 7.
-    expected = "53d506"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 8.
+    expected = "add191"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
