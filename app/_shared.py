@@ -19,12 +19,26 @@ from reportsdb.config import SCHEMA_VERSION  # noqa: E402 — после пра�
 
 DB_PATH = Path(os.environ.get("REPORTSDB_PATH", ROOT / "data" / "reports.duckdb"))
 
-# Палитра проверена скриптом validate_palette.js: цветность, различимость при
-# дальтонизме и контраст к фону. Пары использовать только соседние.
-PALETTE = ["#2a78d6", "#eb6834", "#1baf7a"]
+# Фон диаграмм. Обязан совпадать с backgroundColor в .streamlit/config.toml:
+# этим цветом рисуются зазоры между сегментами, и расхождение видно как кайма.
+SURFACE = "#0f1419"
+
+# Палитра для тёмной темы — те же три оттенка эталонной палитры, но ступени,
+# подобранные под тёмный фон, а не осветлённые автоматически. Проверено
+# scripts/validate_palette.js (--mode dark --surface #0f1419 --pairs all):
+# светлота, цветность, различимость при дальтонизме и контраст к фону — все
+# проверки пройдены.
+#
+# Три цвета — это потолок, а не лень. Круговая диаграмма сравнивает все доли
+# между собой (режим --pairs all), и четвёртый цвет из палитры этой проверки
+# не проходит: жёлтый и оранжевый неразличимы даже при полном цветовосприятии
+# (ΔE 10.6 при пороге 15). Поэтому доли в круговых — строго три, хвост
+# сворачивается в «Прочие», а где классов больше — столбики одним цветом.
+PALETTE = ["#3987e5", "#d95926", "#199e70"]
 ACCENT = PALETTE[0]      # основной ряд
 SECONDARY = PALETTE[1]   # второй ряд в стопке
-MUTED = "#8a8985"        # рецессивные элементы: сетка, опорные линии
+TERTIARY = PALETTE[2]    # третий ряд; дальше цвета не добавлять
+MUTED = "#8b93a1"        # рецессивные элементы: сетка, опорные линии
 
 FOOTPRINT_HINT = (
     "**gross_mb** суммирует общие таблицы в каждом отчёте заново — складывать этот "
@@ -100,7 +114,63 @@ def page_setup(title: str, icon: str = "📊") -> None:
 
 def surface_color() -> str:
     """Цвет фона диаграмм — для зазоров между сегментами стопки."""
-    return "#0e1117" if st.get_option("theme.base") == "dark" else "#ffffff"
+    return SURFACE
+
+
+def donut(
+    labels: list[str],
+    values: list[float],
+    title: str,
+    unit: str = "",
+    height: int = 300,
+) -> None:
+    """Круговая диаграмма «часть от целого». Строго до трёх долей.
+
+    Больше трёх — нельзя: в круге читатель сравнивает все доли между собой, а
+    четвёртый цвет палитры эту проверку не проходит (см. комментарий к
+    PALETTE). Если классов больше, сверните хвост в «Прочие» до вызова.
+
+    Доли подписаны процентами прямо на диаграмме — идентичность не держится на
+    одном цвете. Между долями зазор цветом фона: рамку вокруг сегментов
+    рисовать нельзя, разделяет именно зазор.
+    """
+    import plotly.graph_objects as go
+
+    if len(labels) > len(PALETTE):
+        raise ValueError(
+            f"{title}: долей {len(labels)}, а безопасных цветов {len(PALETTE)}. "
+            "Сверните хвост в «Прочие»."
+        )
+
+    st.markdown(f"**{title}**")
+    fig = go.Figure(
+        go.Pie(
+            labels=labels,
+            values=values,
+            hole=0.58,
+            sort=False,                     # порядок долей задаёт вызывающий
+            direction="clockwise",
+            marker=dict(colors=PALETTE[: len(labels)],
+                        line=dict(color=SURFACE, width=2)),
+            # Единый формат: без шаблона Plotly сам подбирает точность, и в
+            # одной диаграмме оказывается «38,4%» рядом с «7,21%».
+            texttemplate="%{percent:.0%}",
+            textposition="inside",
+            insidetextorientation="horizontal",
+            textfont=dict(size=13),
+            hovertemplate="%{label}<br>%{value:,.0f}" + unit + " · %{percent}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=height,
+        margin=dict(l=0, r=0, t=4, b=0),
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.08, x=0, font=dict(size=12)),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        separators=", ",
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # Открытые соединения. Нужны, чтобы закрыть их перед пересборкой БД: под
@@ -162,6 +232,15 @@ def release_db() -> None:
 @st.cache_data(show_spinner=False)
 def query(sql: str, params: tuple = ()) -> pd.DataFrame:
     return connect().execute(sql, list(params)).df()
+
+
+def table_height(rows: int, limit: int = 400) -> int:
+    """Высота таблицы по числу строк, но не выше `limit`.
+
+    Фиксированная высота у короткой таблицы оставляет полосу пустых строк —
+    на дашборде это выглядит как незаполненные данные.
+    """
+    return min(limit, 38 + 35 * max(rows, 1))
 
 
 # Русские подписи колонок — одни и те же на всех страницах.
