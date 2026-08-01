@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import duckdb
@@ -504,24 +503,7 @@ if st.button("Загрузить", type="primary", use_container_width=True):
             st.dataframe(rejects, use_container_width=True, hide_index=True)
 
     st.info("Данные обновлены — переходите к разделам аналитики в меню слева.")
-
-# --- Экспорт для коллег ----------------------------------------------------
-
-st.divider()
-st.subheader("Файл для коллег")
-st.caption(
-    "Соберёт один HTML-файл со всеми данными внутри: его можно отправить по "
-    "почте, открывается двойным кликом, ничего устанавливать не нужно."
-)
-
-if st.button("Собрать HTML-файл", disabled=not DB_PATH.exists()):
-    from reportsdb.export_html import export
-
-    out = export(DB_PATH)
-    st.success(f"Готово: `{out}` ({out.stat().st_size / 1024:.0f} КБ)")
-    st.download_button(
-        "Скачать reportsdb.html",
-        out.read_bytes(),
-        file_name=f"reportsdb_{datetime.now():%Y%m%d}.html",
-        mime="text/html",
+    st.caption(
+        "Чтобы отдать данные коллеге одним файлом — "
+        "**Инструменты → Файл для коллег**."
     )
