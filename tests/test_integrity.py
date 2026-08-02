@@ -497,6 +497,67 @@ def test_raw_data_is_git_ignored():
     assert "dist/" in ignore
 
 
+# --- Документация ---------------------------------------------------------
+
+# Русский файл — оригинал, английский лежит рядом с суффиксом .en.
+BILINGUAL_DOCS = [
+    (ROOT / "README.md", ROOT / "README.en.md"),
+    (ROOT / "docs" / "RUNBOOK.md", ROOT / "docs" / "RUNBOOK.en.md"),
+    (ROOT / "docs" / "ARCHITECTURE.md", ROOT / "docs" / "ARCHITECTURE.en.md"),
+    (ROOT / "docs" / "TZ.md", ROOT / "docs" / "TZ.en.md"),
+]
+
+
+def _headings(path: Path) -> list[int]:
+    """Уровни заголовков документа: «##» → 2. Текст не сравниваем — он разный."""
+    levels = []
+    in_code = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("```"):
+            in_code = not in_code
+        elif not in_code and line.startswith("#"):
+            levels.append(len(line) - len(line.lstrip("#")))
+    return levels
+
+
+@pytest.mark.parametrize("ru,en", BILINGUAL_DOCS, ids=lambda p: p.name)
+def test_every_document_has_a_translation(ru, en):
+    assert ru.exists(), f"нет русского оригинала: {ru}"
+    assert en.exists(), f"нет английского перевода: {en}"
+
+
+@pytest.mark.parametrize("ru,en", BILINGUAL_DOCS, ids=lambda p: p.name)
+def test_translations_keep_the_same_structure(ru, en):
+    """Одинаковый скелет заголовков у обеих версий.
+
+    Без этой проверки версии расходятся за пару коммитов: правку внесли в
+    русскую, английская осталась прежней и тихо превратилась во враньё.
+    Сравниваются только уровни заголовков — текст, естественно, разный.
+    """
+    assert _headings(ru) == _headings(en), (
+        f"структура {ru.name} и {en.name} разошлась: "
+        f"{len(_headings(ru))} заголовков против {len(_headings(en))}"
+    )
+
+
+@pytest.mark.parametrize("ru,en", BILINGUAL_DOCS, ids=lambda p: p.name)
+def test_documents_link_to_each_other(ru, en):
+    """Переключатель языка есть в обоих файлах, иначе перевод не найти."""
+    assert en.name in ru.read_text(encoding="utf-8")
+    assert ru.name in en.read_text(encoding="utf-8")
+
+
+def test_decision_journal_is_kept_in_both_languages():
+    """Журнал решений — часть документации, а не только русской версии."""
+    count = lambda p: p.read_text(encoding="utf-8").count("\n| 2026-")  # noqa: E731
+    ru = count(ROOT / "docs" / "TZ.md")
+    en = count(ROOT / "docs" / "TZ.en.md")
+    assert ru > 0 and ru == en, (
+        f"записей в журнале: русских {ru}, английских {en} — "
+        "новая запись добавляется в обе версии одним коммитом"
+    )
+
+
 # --- Целостность модели ---------------------------------------------------
 
 def test_no_dangling_bridge_keys(full_db):
