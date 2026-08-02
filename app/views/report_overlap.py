@@ -1,23 +1,35 @@
 """Похожие отчёты: пары, которые ссылаются на один и тот же набор таблиц.
 
-Сигнал для объединения дублирующихся отчётов — в том числе такого, который
-внутри одного РЦ не увидеть: один и тот же отчёт мог быть независимо собран
-для разных заводов и с тех пор разъехался по мелочам.
+Сравниваются только отчёты **одного завода**. Один и тот же отчёт заведён на
+нескольких заводах — это нормальное устройство, а не дубль: объединять там
+нечего, а пар «отчёт сам с собой на соседнем заводе» набегает столько, что за
+ними не видно настоящих кандидатов.
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-from _shared import download, num, page_setup, query, row_picker, search_box
+from _shared import (
+    download,
+    num,
+    page_setup,
+    query,
+    rc_scope,
+    rc_selector,
+    row_picker,
+    search_box,
+)
 
 page_setup("Похожие отчёты", "🧩")
 st.caption(
-    "Пара отчётов, ссылающихся на одни и те же таблицы. Считаются только "
-    "настоящие таблицы — view, mat.view, временные и процедуры не в счёт. "
-    "Совпадение по названию отчёта на разных заводах — это один и тот же "
-    "отчёт, а не похожие; такие пары не показаны."
+    "Пара отчётов **одного завода**, ссылающихся на одни и те же таблицы. "
+    "Считаются только настоящие таблицы — view, mat.view, временные и "
+    "процедуры не в счёт. Отчёты разных заводов между собой не сравниваются: "
+    "один и тот же отчёт живёт на нескольких заводах, и это норма."
 )
+
+network, plant = rc_selector()
 
 pairs = query(
     """
@@ -42,10 +54,12 @@ pairs = query(
         HAVING COUNT(*) >= 2
     )
     SELECT
+        COALESCE(r1.network, '(не указана)') AS network,
+        COALESCE(r1.plant,   '(не указан)')  AS plant,
         r1.report_id AS report_id_1, r1.report_name AS report_1,
-        r1.network AS network_1, r1.plant AS plant_1, r1.catalog_path AS catalog_1,
+        r1.catalog_path AS catalog_1,
         r2.report_id AS report_id_2, r2.report_name AS report_2,
-        r2.network AS network_2, r2.plant AS plant_2, r2.catalog_path AS catalog_2,
+        r2.catalog_path AS catalog_2,
         p.shared AS shared_tables, c1.n AS tables_1, c2.n AS tables_2,
         ROUND(p.shared::DOUBLE / (c1.n + c2.n - p.shared), 3) AS jaccard,
         (p.shared = c1.n AND p.shared = c2.n) AS exact_match
@@ -54,17 +68,19 @@ pairs = query(
     JOIN cnt c2        ON c2.report_id = p.id2
     JOIN dim_report r1 ON r1.report_id = p.id1
     JOIN dim_report r2 ON r2.report_id = p.id2
-    -- Один отчёт, заведённый для разных заводов, ссылается на одни и те же
-    -- таблицы всегда — это не дубль по смыслу, а один и тот же отчёт.
-    WHERE NOT (r1.report_name = r2.report_name AND r1.catalog_path = r2.catalog_path)
+    -- Только внутри одного РЦ. COALESCE, а не сравнение напрямую: NULL = NULL
+    -- в SQL неверно, и отчёты без завода выпали бы из сравнения совсем.
+    WHERE COALESCE(r1.network, '') = COALESCE(r2.network, '')
+      AND COALESCE(r1.plant, '')   = COALESCE(r2.plant, '')
     ORDER BY jaccard DESC, shared_tables DESC
     """
 )
+pairs = rc_scope(pairs, network, plant)
 
 if pairs.empty:
     st.info(
-        "Совпадений не найдено. Это ожидаемо на разнородных данных — "
-        "загляните сюда снова после накопления реальных отчётов."
+        "Совпадений не найдено. Пары ищутся только внутри одного завода — "
+        "если выбран конкретный РЦ, попробуйте посмотреть по всем."
     )
     st.stop()
 
@@ -91,18 +107,16 @@ c2.metric(
     help="Оба отчёта ссылаются ровно на один и тот же набор таблиц.",
 )
 c3.metric(
-    "Разных заводов", num(int((found["plant_1"] != found["plant_2"]).sum())),
-    help="Пара, где отчёты числятся за разными заводами — кандидат, который "
-         "не видно ни на одной странице «Аналитика РЦ» сразу.",
+    "Заводов с парами", num(found[["network", "plant"]].drop_duplicates().shape[0]),
+    help="На скольких РЦ нашлась хотя бы одна пара похожих отчётов.",
 )
 
 picked = row_picker(
     found, "row_key", "overlap",
     [
-        ("Отчёт 1", 30, lambda r: r["report_1"]),
-        ("Завод 1", 10, lambda r: r["plant_1"] or "—"),
-        ("Отчёт 2", 30, lambda r: r["report_2"]),
-        ("Завод 2", 10, lambda r: r["plant_2"] or "—"),
+        ("Завод", 12, lambda r: r["plant"] or "—"),
+        ("Отчёт 1", 29, lambda r: r["report_1"]),
+        ("Отчёт 2", 29, lambda r: r["report_2"]),
         ("Общих", 7, lambda r: num(r["shared_tables"]), True),
         ("Сходство", 9, lambda r: f"{r['jaccard']:.0%}", True),
     ],
@@ -114,10 +128,8 @@ else:
     st.divider()
     st.subheader(f"{picked['report_1']}  ↔  {picked['report_2']}")
     st.caption(
-        f"{picked['network_1'] or '—'} · {picked['plant_1'] or '—'} · "
-        f"`{picked['catalog_1']}`  —  "
-        f"{picked['network_2'] or '—'} · {picked['plant_2'] or '—'} · "
-        f"`{picked['catalog_2']}`"
+        f"{picked['network']} · {picked['plant']}  —  "
+        f"`{picked['catalog_1']}` и `{picked['catalog_2']}`"
     )
     if picked["exact_match"]:
         st.success("Отчёты ссылаются ровно на один и тот же набор таблиц.")

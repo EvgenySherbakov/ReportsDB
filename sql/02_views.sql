@@ -282,8 +282,13 @@ ORDER BY total_duration_sec DESC NULLS LAST;
 
 -- 5.6. Пересечение отчётов по набору источников ---------------------------
 -- Только настоящие таблицы — как и везде, где речь о наборе таблиц отчёта.
--- Пара исключается, если это один и тот же отчёт на разных заводах (общие
--- имя и каталог): такая пара похожа на 100%, но объединять там нечего.
+--
+-- Сравниваются только отчёты одного завода. Один и тот же отчёт живёт на
+-- нескольких заводах, и это нормальное устройство, а не дубль: объединять
+-- там нечего, а пар «отчёт сам с собой на соседнем заводе» набегает столько,
+-- что за ними не видно настоящих кандидатов. Ограничение по РЦ заодно делает
+-- ненужным прежний отбор по совпадению имени и каталога: внутри одного завода
+-- пара «имя + каталог» уникальна по ключу отчёта.
 CREATE VIEW v_report_overlap AS
 WITH cnt AS (
     SELECT b.report_id, COUNT(*) AS n
@@ -304,6 +309,8 @@ pairs AS (
     GROUP BY 1, 2
 )
 SELECT
+    COALESCE(r1.network, '(не указана)') AS network,
+    COALESCE(r1.plant,   '(не указан)')  AS plant,
     r1.report_name AS report_1,
     r2.report_name AS report_2,
     p.shared_tables,
@@ -315,8 +322,11 @@ JOIN cnt c1        ON c1.report_id = p.report_id_1
 JOIN cnt c2        ON c2.report_id = p.report_id_2
 JOIN dim_report r1 ON r1.report_id = p.report_id_1
 JOIN dim_report r2 ON r2.report_id = p.report_id_2
-WHERE p.shared_tables::DOUBLE / (c1.n + c2.n - p.shared_tables) >= 0.8
-  AND NOT (r1.report_name = r2.report_name AND r1.catalog_path = r2.catalog_path)
+-- Только внутри одного РЦ. COALESCE, а не сравнение напрямую: NULL = NULL
+-- в SQL неверно, и отчёты без указанного завода выпали бы из сравнения совсем.
+WHERE COALESCE(r1.network, '') = COALESCE(r2.network, '')
+  AND COALESCE(r1.plant, '')   = COALESCE(r2.plant, '')
+  AND p.shared_tables::DOUBLE / (c1.n + c2.n - p.shared_tables) >= 0.8
 ORDER BY jaccard DESC, p.shared_tables DESC;
 
 

@@ -539,14 +539,58 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 8.
-    expected = "add191"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 9.
+    expected = "3c7152"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
         f"Поднимите SCHEMA_VERSION в src/reportsdb/config.py и обновите слепок "
         f"в этом тесте."
     )
+
+
+def test_report_overlap_stays_inside_one_plant(full_db):
+    """Похожие отчёты ищутся только внутри одного завода.
+
+    Один и тот же отчёт заведён на нескольких заводах — это нормальное
+    устройство, а не дубль. Пары между заводами не только бесполезны, их ещё и
+    столько, что за ними не видно настоящих кандидатов на объединение.
+    """
+    # Витрина несёт РЦ первого отчёта пары. Если второй на этом РЦ не
+    # существует — значит пара межзаводская и просочилась мимо ограничения.
+    cross = full_db.execute(
+        """
+        SELECT COUNT(*) FROM v_report_overlap o
+        WHERE NOT EXISTS (
+            SELECT 1 FROM dim_report r
+            WHERE r.report_name = o.report_2
+              AND COALESCE(r.network, '(не указана)') = o.network
+              AND COALESCE(r.plant,   '(не указан)')  = o.plant
+        )
+        """
+    ).fetchone()[0]
+    assert cross == 0, "в витрину попала пара отчётов с разных заводов"
+
+
+def test_export_overlap_query_stays_inside_one_plant(full_db):
+    """То же ограничение в выгрузке для коллег — на живых строках.
+
+    У витрины порог сходства 0.8, и на демо-данных она пуста, так что проверка
+    выше срабатывает вхолостую. Запрос выгрузки идёт с порогом 0.3 и строки
+    возвращает — на нём правило видно по-настоящему.
+    """
+    from reportsdb.export_html import QUERIES
+
+    rows = full_db.execute(QUERIES["overlap"]).df()
+    assert not rows.empty, "на демо-данных пары внутри завода обязаны находиться"
+
+    plants = full_db.execute(
+        "SELECT report_id, COALESCE(network, '') || '|' || COALESCE(plant, '') AS rc "
+        "FROM dim_report"
+    ).df().set_index("report_id")["rc"].to_dict()
+    mixed = [(a, b) for a, b in zip(rows["id1"], rows["id2"])
+             if plants[a] != plants[b]]
+    assert not mixed, f"в выгрузку попали пары отчётов с разных заводов: {len(mixed)}"
 
 
 def test_every_source_row_accounted_for(full_db):

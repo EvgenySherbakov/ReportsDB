@@ -378,10 +378,11 @@
 
 <section data-tab="overlap" hidden>
   <h2>Похожие отчёты</h2>
-  <p class="hint">Пары отчётов, ссылающихся на один и тот же набор таблиц —
-  кандидаты на объединение. Показаны пары не менее чем с двумя общими таблицами
-  и сходством от 30%. Один и тот же отчёт на разных заводах похожей парой не
-  считается. Щёлкните по паре, чтобы увидеть общие и различающиеся таблицы.</p>
+  <p class="hint">Пары отчётов <b>одного завода</b>, ссылающихся на один и тот
+  же набор таблиц — кандидаты на объединение. Показаны пары не менее чем с
+  двумя общими таблицами и сходством от 30%. Отчёты разных заводов между собой
+  не сравниваются: один и тот же отчёт живёт на нескольких заводах, и это
+  норма. Щёлкните по паре, чтобы увидеть общие и различающиеся таблицы.</p>
   <div class="metrics" id="m-overlap"></div>
   <div class="controls">
     <input type="search" id="q-overlap" placeholder="Поиск по имени отчёта…">
@@ -488,11 +489,10 @@ const RC3_ROWS = objectsOfKind('ROUTINE');
 const OVERLAP_ROWS = DATA.overlap.map(p => {
   const a = REPORT_BY_ID.get(p.id1) || {}, b = REPORT_BY_ID.get(p.id2) || {};
   return {
+    // Пара всегда внутри одного РЦ, поэтому сеть и завод у неё одни.
     pair_key: `${p.id1}|${p.id2}`, id1: p.id1, id2: p.id2,
-    report_1: a.report_name, plant_1: a.plant, network_1: a.network,
-    catalog_1: a.catalog_path,
-    report_2: b.report_name, plant_2: b.plant, network_2: b.network,
-    catalog_2: b.catalog_path,
+    report_1: a.report_name, catalog_1: a.catalog_path,
+    report_2: b.report_name, catalog_2: b.catalog_path,
     network: a.network, plant: a.plant,
     shared: p.shared, tables_1: p.tables_1, tables_2: p.tables_2,
     exact: p.shared === p.tables_1 && p.shared === p.tables_2,
@@ -854,10 +854,10 @@ const DURATION_COLS = [
   {key: 'duration_band', label: 'Длительность выборки'},
 ];
 const OVERLAP_COLS = [
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
   {key: 'report_1', label: 'Отчёт 1', wide: true},
-  {key: 'plant_1', label: 'Завод 1'},
   {key: 'report_2', label: 'Отчёт 2', wide: true},
-  {key: 'plant_2', label: 'Завод 2'},
   {key: 'shared', label: 'Общих таблиц', num: true},
   {key: 'tables_1', label: 'Таблиц у 1-го', num: true},
   {key: 'tables_2', label: 'Таблиц у 2-го', num: true},
@@ -1121,9 +1121,8 @@ function showOverlap(row) {
     .sort((x, y) => x[1].localeCompare(y[1], 'ru') || x[0].localeCompare(y[0], 'ru'));
   host.innerHTML = `
     <div class="title">${esc(row.report_1)} ↔ ${esc(row.report_2)}</div>
-    <div class="path">${esc(row.network_1)} · ${esc(row.plant_1)} ·
-      ${esc(row.catalog_1)} — ${esc(row.network_2)} · ${esc(row.plant_2)} ·
-      ${esc(row.catalog_2)}</div>
+    <div class="path">${esc(row.network)} · ${esc(row.plant)} —
+      ${esc(row.catalog_1)} и ${esc(row.catalog_2)}</div>
     ${row.exact ? '<p class="note">Отчёты ссылаются ровно на один и тот же '
       + 'набор таблиц.</p>' : ''}
     ${miniTable([['Таблица'], ['Есть у']],
@@ -1225,7 +1224,7 @@ makeTable({name: 'overlap', el: 't-overlap', rows: OVERLAP_ROWS, cols: OVERLAP_C
   onRender: d => tiles('m-overlap', [
     ['Показано пар', fmt(d.length)],
     ['Точных совпадений', fmt(countOf(d, r => r.exact))],
-    ['Разных заводов', fmt(countOf(d, r => r.plant_1 !== r.plant_2))],
+    ['Заводов с парами', fmt(uniqOf(d, 'plant'))],
   ])});
 makeTable({name: 'abc', el: 't-abc', rowsFn: abcRows, cols: ABC_COLS,
   search: document.getElementById('q-abc'), count: 'c-abc'});

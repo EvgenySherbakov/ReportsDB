@@ -107,7 +107,8 @@ QUERIES = {
     """,
     # Похожие отчёты. Порог сходства содержательный, а не обрезка: пары с
     # одной общей таблицей — это шум, которого на реальных данных десятки
-    # тысяч. Пара «один отчёт на разных заводах» исключена — это не дубль.
+    # тысяч. Сравниваются только отчёты одного завода: один и тот же отчёт
+    # живёт на нескольких заводах, и это норма, а не дубль.
     "overlap": """
         WITH cnt AS (
             SELECT b.report_id, COUNT(*) AS n
@@ -134,9 +135,9 @@ QUERIES = {
         JOIN cnt c2        ON c2.report_id = p.id2
         JOIN dim_report r1 ON r1.report_id = p.id1
         JOIN dim_report r2 ON r2.report_id = p.id2
-        WHERE p.shared::DOUBLE / (c1.n + c2.n - p.shared) >= 0.3
-          AND NOT (r1.report_name = r2.report_name
-                   AND r1.catalog_path = r2.catalog_path)
+        WHERE COALESCE(r1.network, '') = COALESCE(r2.network, '')
+          AND COALESCE(r1.plant, '')   = COALESCE(r2.plant, '')
+          AND p.shared::DOUBLE / (c1.n + c2.n - p.shared) >= 0.3
         ORDER BY jaccard DESC, p.shared DESC
     """,
     # Справочник таблиц — критичность и «сироты».
