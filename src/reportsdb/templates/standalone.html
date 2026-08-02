@@ -15,34 +15,37 @@
     --text-muted:     #8a8985;
     --series-1: #2a78d6;
     --series-2: #eb6834;
+    --series-3: #1baf7a;
     --warn-bg:  #fdf4e6;
     --warn-br:  #eda100;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
-      --surface-0: #111110;
-      --surface-1: #1a1a19;
-      --border:    #35342f;
-      --text-primary:   #ffffff;
-      --text-secondary: #c3c2b7;
-      --text-muted:     #8a8985;
+      --surface-0: #0f1419;
+      --surface-1: #181e26;
+      --border:    #2b333e;
+      --text-primary:   #e6e9ee;
+      --text-secondary: #b3bac5;
+      --text-muted:     #8b93a1;
       --series-1: #3987e5;
       --series-2: #d95926;
+      --series-3: #199e70;
       --warn-bg:  #2a2410;
       --warn-br:  #c98500;
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --surface-0: #111110;
-    --surface-1: #1a1a19;
-    --border:    #35342f;
-    --text-primary:   #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted:     #8a8985;
+    --surface-0: #0f1419;
+    --surface-1: #181e26;
+    --border:    #2b333e;
+    --text-primary:   #e6e9ee;
+    --text-secondary: #b3bac5;
+    --text-muted:     #8b93a1;
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #199e70;
     --warn-bg:  #2a2410;
     --warn-br:  #c98500;
   }
@@ -58,14 +61,44 @@
            padding: 1.75rem 0 1rem; }
   h1 { font-size: 1.4rem; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   h2 { font-size: 1.05rem; margin: 0 0 .75rem; font-weight: 620; }
+  h3 { font-size: .95rem; margin: 1.1rem 0 .6rem; font-weight: 620; }
   .sub { color: var(--text-muted); font-size: .85rem; }
-  #theme { margin-left: auto; background: var(--surface-1); color: var(--text-secondary);
+  #theme { background: var(--surface-1); color: var(--text-secondary);
            border: 1px solid var(--border); border-radius: 6px; padding: .35rem .7rem;
-           cursor: pointer; font-size: .85rem; }
+           cursor: pointer; font-size: .85rem; font-family: inherit; }
+
+  /* Разрез по РЦ — общий для всех разделов, как выбор РЦ в приложении. */
+  .scopebar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+              margin-left: auto; }
+  .scopebar label { color: var(--text-secondary); font-size: .85rem; }
+
+  /* Вкладки повторяют разделы меню приложения. */
+  nav.tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: 1.1rem;
+             align-items: center; }
+  nav.tabs .grp { color: var(--text-muted); font-size: .72rem; text-transform: uppercase;
+                  letter-spacing: .05em; padding: 0 .3rem 0 .7rem; }
+  nav.tabs .grp:first-child { padding-left: 0; }
+  nav.tabs button { background: var(--surface-1); color: var(--text-secondary);
+                    border: 1px solid var(--border); border-radius: 7px;
+                    padding: .35rem .7rem; cursor: pointer; font-size: .85rem;
+                    font-family: inherit; }
+  nav.tabs button:hover { color: var(--text-primary); }
+  nav.tabs button[aria-selected="true"] { background: var(--series-1); color: #fff;
+                                          border-color: var(--series-1); }
+
+  /* Вложенные виды внутри раздела — как st.tabs в приложении. */
+  nav.subtabs { display: flex; gap: .35rem; margin: 0 0 .9rem; flex-wrap: wrap; }
+  nav.subtabs button { background: none; color: var(--text-secondary);
+                       border: none; border-bottom: 2px solid transparent;
+                       padding: .3rem .6rem; cursor: pointer; font-size: .87rem;
+                       font-family: inherit; }
+  nav.subtabs button:hover { color: var(--text-primary); }
+  nav.subtabs button[aria-selected="true"] { color: var(--text-primary);
+                                             border-bottom-color: var(--series-1); }
 
   .kpis { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
           margin-bottom: 1.25rem; }
-  .kpi { background: var(--surface-1); border: 1px solid var(--border);
+  .kpi { background: var(--surface-0); border: 1px solid var(--border);
          border-radius: 10px; padding: .8rem .9rem; }
   .kpi .v { font-size: 1.5rem; font-weight: 640; font-variant-numeric: tabular-nums; }
   .kpi .l { color: var(--text-secondary); font-size: .78rem; margin-top: .15rem; }
@@ -77,7 +110,8 @@
 
   section { background: var(--surface-1); border: 1px solid var(--border);
             border-radius: 10px; padding: 1.1rem; margin-bottom: 1.25rem; }
-  .controls { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .9rem; }
+  .controls { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .9rem;
+              align-items: center; }
   input[type=search], select {
     background: var(--surface-0); color: var(--text-primary);
     border: 1px solid var(--border); border-radius: 6px;
@@ -86,8 +120,10 @@
   input[type=search] { min-width: 220px; flex: 1; }
   button.csv { background: var(--surface-0); color: var(--text-secondary);
                border: 1px solid var(--border); border-radius: 6px;
-               padding: .4rem .8rem; cursor: pointer; font-size: .85rem; }
+               padding: .4rem .8rem; cursor: pointer; font-size: .85rem;
+               font-family: inherit; }
   button.csv:hover { color: var(--text-primary); }
+  .count { color: var(--text-muted); font-size: .82rem; }
 
   .scroll { overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; font-size: .86rem; }
@@ -101,6 +137,9 @@
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   td.name { white-space: normal; min-width: 220px; }
   tbody tr:hover { background: var(--surface-0); }
+  tbody tr.pickable { cursor: pointer; }
+  tbody tr.picked, tbody tr.picked:hover { background: var(--series-1); }
+  tbody tr.picked td { color: #fff; }
   .tall { max-height: 460px; overflow-y: auto; }
 
   /* Горизонтальная столбчатая диаграмма на чистом CSS. */
@@ -114,11 +153,24 @@
   .chart .seg.s2 { background: var(--series-2); }
   .chart .val { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
   .legend { display: flex; gap: 1rem; font-size: .82rem; color: var(--text-secondary);
-            margin-bottom: .75rem; }
+            margin-bottom: .75rem; flex-wrap: wrap; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
               margin-right: .35rem; vertical-align: baseline; }
   .legend .s1 { background: var(--series-1); }
   .legend .s2 { background: var(--series-2); }
+  .legend .s3 { background: var(--series-3); }
+
+  /* Карточка выбранного отчёта. */
+  .card { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem; }
+  .card .title { font-size: 1.05rem; font-weight: 640; }
+  .card .path { color: var(--text-muted); font-size: .83rem; margin-bottom: .8rem; }
+  .metrics { display: grid; gap: .6rem; margin-bottom: 1rem;
+             grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+  .metrics div { background: var(--surface-0); border: 1px solid var(--border);
+                 border-radius: 8px; padding: .55rem .7rem; }
+  .metrics .v { font-size: 1.15rem; font-weight: 630; font-variant-numeric: tabular-nums; }
+  .metrics .l { color: var(--text-secondary); font-size: .75rem; }
+
   .empty { color: var(--text-muted); font-size: .87rem; padding: .5rem 0; }
   .hint { color: var(--text-secondary); font-size: .85rem; margin: -.4rem 0 .9rem; }
   footer { color: var(--text-muted); font-size: .8rem; padding-top: .5rem; }
@@ -129,20 +181,30 @@
 <header>
   <h1>Отчётность SSRS</h1>
   <span class="sub" id="meta"></span>
-  <button id="theme" type="button">Тема</button>
+  <span class="scopebar">
+    <label for="f-rc">Распределительный центр</label>
+    <select id="f-rc"></select>
+    <button id="theme" type="button">Тема</button>
+  </span>
 </header>
 
-<div class="kpis" id="kpis"></div>
+<nav class="tabs" id="tabs"></nav>
 
-<p class="note">
-  <b>gross_mb</b> суммирует общие таблицы в каждом отчёте заново — складывать этот
-  столбец по отчётам нельзя, это не объём хранилища. Объём, который реально
-  освободится при выводе отчёта, — <b>exclusive_mb</b>: таблицы, которых не
-  касается больше ни один отчёт.
-</p>
-
-<section>
-  <h2>Топ-20 отчётов по освобождаемому объёму</h2>
+<!-- ======================= Обзор ======================= -->
+<section data-tab="overview">
+  <h2 id="kpi-title">Показатели</h2>
+  <div class="kpis" id="kpis"></div>
+  <p class="note">
+    <b>gross_mb</b> суммирует общие таблицы в каждом отчёте заново — складывать этот
+    столбец по отчётам нельзя, это не объём хранилища. Объём, который реально
+    освободится при выводе отчёта, — <b>exclusive_mb</b>: таблицы, которых не
+    касается больше ни один отчёт.
+  </p>
+  <h3>Сводка по РЦ</h3>
+  <div class="scroll"><table id="t-rc"></table></div>
+  <h3>Схемы БД</h3>
+  <div class="scroll tall"><table id="t-schemas"></table></div>
+  <h3>Топ-20 отчётов по освобождаемому объёму</h3>
   <div class="legend">
     <span><i class="s1"></i>Освободится (эксклюзивные таблицы)</span>
     <span><i class="s2"></i>Останется (общие таблицы)</span>
@@ -150,56 +212,218 @@
   <div class="chart" id="chart-top"></div>
 </section>
 
-<section>
-  <h2>Отчёты</h2>
+<!-- ==================== Аналитика РЦ ==================== -->
+<section data-tab="rc1" hidden>
+  <h2>№1. Таблицы и размеры</h2>
+  <p class="hint">Полный каталог таблиц из файла размеров: строка на пару
+  «таблица + завод». От отчётов не зависит — таблица попадает сюда, даже если на
+  неё не ссылается ни один отчёт.</p>
+  <div class="metrics" id="m-sizes"></div>
   <div class="controls">
-    <input type="search" id="q-reports" placeholder="Поиск по имени или пути…">
-    <select id="f-folder"></select>
-    <button class="csv" data-csv="reports">Выгрузить CSV</button>
+    <input type="search" id="q-sizes" placeholder="Поиск по имени таблицы…">
+    <select id="f-sizes"></select>
+    <span class="count" id="c-sizes"></span>
+    <button class="csv" data-csv="sizes">Выгрузить CSV</button>
   </div>
-  <div class="scroll tall"><table id="t-reports"></table></div>
+  <div class="scroll tall"><table id="t-sizes"></table></div>
 </section>
 
-<section>
-  <h2>Кандидаты на вывод из эксплуатации</h2>
-  <div class="controls">
-    <input type="search" id="q-candidates" placeholder="Поиск…">
-    <select id="f-confidence"></select>
-    <button class="csv" data-csv="candidates">Выгрузить CSV</button>
+<section data-tab="rc2" hidden>
+  <h2>№2. Отчёт → таблицы</h2>
+  <p class="hint">Только настоящие таблицы: view, материализованные view,
+  временные и generated-объекты исключены — они не отражают физического
+  хранения.</p>
+  <div class="metrics" id="m-rc2"></div>
+  <nav class="subtabs" data-sub-of="rc2">
+    <button type="button" data-sub="rc2rep">По отчётам</button>
+    <button type="button" data-sub="rc2tab">По таблицам</button>
+    <button type="button" data-sub="rc2all">Все связи</button>
+  </nav>
+
+  <div data-sub="rc2rep">
+    <p class="hint">Строка — отчёт. Щёлкните по ней: ниже появится разбор его
+    таблиц-источников. Повторный щелчок снимает выбор.</p>
+    <div class="controls">
+      <input type="search" id="q-rc2rep" placeholder="Поиск по наименованию отчёта…">
+      <span class="count" id="c-rc2rep"></span>
+      <button class="csv" data-csv="rc2rep">Выгрузить CSV</button>
+    </div>
+    <div class="scroll" style="max-height:330px;overflow-y:auto">
+      <table id="t-rc2rep"></table>
+    </div>
+    <div class="card" id="rc2rep-detail"></div>
   </div>
-  <div class="scroll tall"><table id="t-candidates"></table></div>
+
+  <div data-sub="rc2tab" hidden>
+    <p class="hint">Строка — таблица. Щёлкните по ней, чтобы увидеть, в какие
+    отчёты она попадает.</p>
+    <div class="controls">
+      <input type="search" id="q-rc2tab" placeholder="Поиск по наименованию таблицы…">
+      <span class="count" id="c-rc2tab"></span>
+      <button class="csv" data-csv="rc2tab">Выгрузить CSV</button>
+    </div>
+    <div class="scroll" style="max-height:330px;overflow-y:auto">
+      <table id="t-rc2tab"></table>
+    </div>
+    <div class="card" id="rc2tab-detail"></div>
+    <p class="hint" style="margin-top:.9rem">Объём взят как максимум по строкам
+    таблицы, а не как сумма: одна и та же таблица приходит здесь в нескольких
+    отчётах, и складывать её размер заново на каждый отчёт нельзя.</p>
+  </div>
+
+  <div data-sub="rc2all" hidden>
+    <div class="controls">
+      <input type="search" id="q-rc2" placeholder="Поиск по отчёту или таблице…">
+      <span class="count" id="c-rc2"></span>
+      <button class="csv" data-csv="rc2">Выгрузить CSV</button>
+    </div>
+    <div class="scroll tall"><table id="t-rc2"></table></div>
+  </div>
 </section>
 
-<section>
-  <h2>Глубина хранения данных</h2>
+<section data-tab="rc3" hidden>
+  <h2>№3. Отчёт → функции и процедуры</h2>
+  <p class="hint">Изменение самых востребованных процедур затронет наибольшее
+  число отчётов.</p>
+  <div class="metrics" id="m-rc3"></div>
+  <div class="controls">
+    <input type="search" id="q-rc3" placeholder="Поиск по отчёту или функции…">
+    <span class="count" id="c-rc3"></span>
+    <button class="csv" data-csv="rc3">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-rc3"></table></div>
+</section>
+
+<section data-tab="rc4" hidden>
+  <h2>№4. Отчёт → обращения</h2>
+  <p class="hint">Мерой активности служит число обращений. Отчёты без обращений —
+  первые кандидаты на вывод из эксплуатации.</p>
+  <div class="metrics" id="m-usage"></div>
+  <div class="controls">
+    <input type="search" id="q-usage" placeholder="Поиск…">
+    <select id="f-usage"></select>
+    <span class="count" id="c-usage"></span>
+    <button class="csv" data-csv="usage">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-usage"></table></div>
+</section>
+
+<section data-tab="rc5" hidden>
+  <h2>№5. Отчёт → глубина хранения</h2>
   <p class="hint">Глубина задана на таблицу; у отчёта берётся максимум по его
   таблицам. Отчёты с глубиной более 45 дней — первые кандидаты на сокращение
   срока хранения.</p>
+  <div class="metrics" id="m-retention"></div>
   <div class="controls">
     <input type="search" id="q-retention" placeholder="Поиск…">
     <select id="f-retention"></select>
+    <span class="count" id="c-retention"></span>
     <button class="csv" data-csv="retention">Выгрузить CSV</button>
   </div>
   <div class="scroll tall"><table id="t-retention"></table></div>
 </section>
 
-<section>
-  <h2>Время выполнения</h2>
-  <p class="hint">Вторая, независимая от объёма метрика стоимости: суммарное
-  время — это число обращений, умноженное на среднюю длительность выборки.</p>
+<!-- ======================= Отчёты ======================= -->
+<section data-tab="card" hidden>
+  <h2>Карточка отчёта</h2>
+  <p class="hint">Щёлкните по строке отчёта — ниже появятся его таблицы,
+  функции, прочие объекты и отчёты-соседи по тем же таблицам. Повторный щелчок
+  снимает выбор.</p>
+  <div class="controls">
+    <input type="search" id="q-card" placeholder="Поиск по имени или пути…">
+    <span class="count" id="c-card"></span>
+  </div>
+  <div class="scroll" style="max-height:330px;overflow-y:auto">
+    <table id="t-card"></table>
+  </div>
+  <div class="card" id="card-detail"></div>
+</section>
+
+<section data-tab="cost" hidden>
+  <h2>Объём и стоимость</h2>
+  <p class="hint">Две независимые метрики стоимости: объём данных за отчётом и
+  время — число обращений, умноженное на среднюю длительность выборки.</p>
+  <div class="metrics" id="m-reports"></div>
+  <div class="controls">
+    <input type="search" id="q-reports" placeholder="Поиск по имени или пути…">
+    <select id="f-folder"></select>
+    <span class="count" id="c-reports"></span>
+    <button class="csv" data-csv="reports">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-reports"></table></div>
+  <h3>Время выполнения</h3>
+  <div class="metrics" id="m-durations"></div>
   <div class="controls">
     <input type="search" id="q-durations" placeholder="Поиск…">
     <select id="f-band"></select>
+    <span class="count" id="c-durations"></span>
     <button class="csv" data-csv="durations">Выгрузить CSV</button>
   </div>
   <div class="scroll tall"><table id="t-durations"></table></div>
 </section>
 
-<section>
+<section data-tab="candidates" hidden>
+  <h2>Кандидаты на вывод из эксплуатации</h2>
+  <p class="hint">Освободится только объём эксклюзивных таблиц — общие останутся
+  нужны другим отчётам.</p>
+  <div class="metrics" id="m-candidates"></div>
+  <div class="controls">
+    <input type="search" id="q-candidates" placeholder="Поиск…">
+    <select id="f-confidence"></select>
+    <span class="count" id="c-candidates"></span>
+    <button class="csv" data-csv="candidates">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-candidates"></table></div>
+</section>
+
+<section data-tab="overlap" hidden>
+  <h2>Похожие отчёты</h2>
+  <p class="hint">Пары отчётов, ссылающихся на один и тот же набор таблиц —
+  кандидаты на объединение. Показаны пары не менее чем с двумя общими таблицами
+  и сходством от 30%. Один и тот же отчёт на разных заводах похожей парой не
+  считается. Щёлкните по паре, чтобы увидеть общие и различающиеся таблицы.</p>
+  <div class="metrics" id="m-overlap"></div>
+  <div class="controls">
+    <input type="search" id="q-overlap" placeholder="Поиск по имени отчёта…">
+    <span class="count" id="c-overlap"></span>
+    <button class="csv" data-csv="overlap">Выгрузить CSV</button>
+  </div>
+  <div class="scroll" style="max-height:330px;overflow-y:auto">
+    <table id="t-overlap"></table>
+  </div>
+  <div class="card" id="overlap-detail"></div>
+</section>
+
+<section data-tab="abc" hidden>
+  <h2>ABC-анализ отчётов</h2>
+  <p class="hint">Отчёты, отсортированные по выбранной мере и разрезанные по
+  накопленной доле: A — первые 80% итога, B — до 95%, C — остальной хвост.</p>
+  <div class="controls">
+    <label class="count" for="f-measure">Мера</label>
+    <select id="f-measure">
+      <option value="exclusive_mb">Объём данных (эксклюзивный), МБ</option>
+      <option value="exec_count">Число обращений</option>
+      <option value="total_duration_sec">Суммарное время выполнения, с</option>
+    </select>
+    <input type="search" id="q-abc" placeholder="Поиск…">
+    <span class="count" id="c-abc"></span>
+    <button class="csv" data-csv="abc">Выгрузить CSV</button>
+  </div>
+  <div class="metrics" id="abc-summary"></div>
+  <div class="scroll tall"><table id="t-abc"></table></div>
+</section>
+
+<!-- ===================== Справочники ==================== -->
+<section data-tab="tables" hidden>
   <h2>Таблицы-источники</h2>
+  <p class="hint">Какая таблица в скольких отчётах используется и что сломается
+  при её изменении. Разрез по РЦ к этому справочнику не применяется: таблица
+  общая для всех заводов.</p>
+  <div class="metrics" id="m-tables"></div>
   <div class="controls">
     <input type="search" id="q-tables" placeholder="Поиск по имени таблицы…">
     <select id="f-schema"></select>
+    <span class="count" id="c-tables"></span>
     <button class="csv" data-csv="tables">Выгрузить CSV</button>
   </div>
   <div class="scroll tall"><table id="t-tables"></table></div>
@@ -212,9 +436,20 @@
 const DATA = /*__DATA__*/null;
 
 const nf = new Intl.NumberFormat('ru-RU');
-const nf1 = new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 1});
+// Знаки после запятой не «до», а «ровно»: в приложении колонки заданы через
+// %.1f/%.2f/%.3f, и без минимума 5,0 печаталось бы как 5, а 30,60 — как 30,6.
+const nfd = [1, 2, 3].map(d => new Intl.NumberFormat('ru-RU',
+  {minimumFractionDigits: d, maximumFractionDigits: d}));
 const fmt = (v, d) => v === null || v === undefined || Number.isNaN(v)
-  ? '—' : (d ? nf1.format(v) : nf.format(v));
+  ? '—' : (d ? nfd[d - 1].format(v) : nf.format(v));
+// Итоговые суммы в плитках показателей — целыми, как st.metric в приложении.
+const fmtInt = v => v === null || v === undefined || Number.isNaN(v)
+  ? '—' : nf.format(Math.round(v));
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c =>
+    ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+}
 
 /* --- Тема ------------------------------------------------------------- */
 document.getElementById('theme').onclick = () => {
@@ -223,22 +458,131 @@ document.getElementById('theme').onclick = () => {
   document.documentElement.dataset.theme = cur === 'dark' ? 'light' : 'dark';
 };
 
-/* --- KPI --------------------------------------------------------------- */
+/* --- Справочники и индексы --------------------------------------------- */
+// Связи несут только report_id — имя, сеть и завод подставляются отсюда. Так
+// строки связей не тащат за собой повторяющиеся строковые поля: на тысячах
+// связей это разница в разы по размеру файла.
+const REPORT_BY_ID = new Map(DATA.reports.map(r => [r.report_id, r]));
+const OBJECTS_BY_REPORT = new Map();
+for (const o of DATA.objects) {
+  if (!OBJECTS_BY_REPORT.has(o.report_id)) OBJECTS_BY_REPORT.set(o.report_id, []);
+  OBJECTS_BY_REPORT.get(o.report_id).push(o);
+}
+
+function objectsOfKind(kind) {
+  return DATA.objects.filter(o => o.object_kind === kind).map(o => {
+    const r = REPORT_BY_ID.get(o.report_id) || {};
+    return {
+      report_id: o.report_id,
+      report_no: r.report_no, report_name: r.report_name,
+      network: r.network, plant: r.plant, catalog_path: r.catalog_path,
+      full_name: o.full_name, schema_name: o.schema_name,
+      total_mb: o.total_mb, percent_of_total: o.percent_of_total,
+      retention_days: o.retention_days, used_by: o.used_by,
+    };
+  });
+}
+const RC2_ROWS = objectsOfKind('TABLE');
+const RC3_ROWS = objectsOfKind('ROUTINE');
+
+const OVERLAP_ROWS = DATA.overlap.map(p => {
+  const a = REPORT_BY_ID.get(p.id1) || {}, b = REPORT_BY_ID.get(p.id2) || {};
+  return {
+    pair_key: `${p.id1}|${p.id2}`, id1: p.id1, id2: p.id2,
+    report_1: a.report_name, plant_1: a.plant, network_1: a.network,
+    catalog_1: a.catalog_path,
+    report_2: b.report_name, plant_2: b.plant, network_2: b.network,
+    catalog_2: b.catalog_path,
+    network: a.network, plant: a.plant,
+    shared: p.shared, tables_1: p.tables_1, tables_2: p.tables_2,
+    exact: p.shared === p.tables_1 && p.shared === p.tables_2,
+    jaccard_pct: p.jaccard === null ? null : Math.round(p.jaccard * 100),
+  };
+});
+
+/* --- Два вида связи «отчёт ↔ таблица», как в приложении ------------------ */
+// Оба вида считаются от строк текущего разреза по РЦ: иначе «по таблицам»
+// показывало бы отчёты чужих заводов при выбранном РЦ.
+function rc2InScope() { return RC2_ROWS.filter(inScope); }
+
+function rc2ByReports() {
+  const by = new Map();
+  for (const r of rc2InScope()) {
+    let g = by.get(r.report_id);
+    if (!g) {
+      g = {report_id: r.report_id, report_name: r.report_name,
+           network: r.network, plant: r.plant, catalog_path: r.catalog_path,
+           table_count: 0, total_mb: 0, retention_days: null, _mb: false};
+      by.set(r.report_id, g);
+    }
+    g.table_count += 1;
+    if (r.total_mb !== null && r.total_mb !== undefined) {
+      g.total_mb += r.total_mb; g._mb = true;
+    }
+    if (r.retention_days !== null && r.retention_days !== undefined) {
+      g.retention_days = Math.max(g.retention_days ?? 0, r.retention_days);
+    }
+  }
+  return [...by.values()].map(g => ({...g, total_mb: g._mb ? g.total_mb : null}));
+}
+
+function rc2ByTables() {
+  const by = new Map();
+  for (const r of rc2InScope()) {
+    let g = by.get(r.full_name);
+    if (!g) {
+      g = {full_name: r.full_name, schema_name: r.schema_name,
+           report_count: 0, total_mb: null, retention_days: null};
+      by.set(r.full_name, g);
+    }
+    g.report_count += 1;
+    // Максимум, а не сумма: одна и та же таблица приходит здесь в нескольких
+    // отчётах, складывать её размер заново на каждый отчёт нельзя.
+    if (r.total_mb !== null && r.total_mb !== undefined) {
+      g.total_mb = Math.max(g.total_mb ?? 0, r.total_mb);
+    }
+    if (r.retention_days !== null && r.retention_days !== undefined) {
+      g.retention_days = Math.max(g.retention_days ?? 0, r.retention_days);
+    }
+  }
+  return [...by.values()];
+}
+
+/* --- Разрез по РЦ ------------------------------------------------------- */
+// Один выбор на весь файл, как выбор РЦ в приложении. Строки без сети и завода
+// (справочник таблиц) фильтр не трогает: таблица общая для всех заводов.
+const rcSelect = document.getElementById('f-rc');
+const rcPairs = [...new Set(DATA.reports.map(r => `${r.network} · ${r.plant}`))].sort();
+rcSelect.innerHTML = '<option value="">Все ТС и заводы</option>'
+  + rcPairs.map(v => `<option>${esc(v)}</option>`).join('');
+
+function inScope(row) {
+  const v = rcSelect.value;
+  if (!v) return true;
+  if (row.network === undefined || row.plant === undefined) return true;
+  return `${row.network} · ${row.plant}` === v;
+}
+
+/* --- KPI ---------------------------------------------------------------- */
+// Те же четыре плитки, что на «Обзоре» приложения, и так же в разрезе РЦ.
+// Отчёты фильтруются по своим сети и заводу, таблицы — по своим: размер одной
+// таблицы на разных заводах разный, складывать заводы в один итог нельзя.
 const k = DATA.kpi;
-const kpis = [
-  ['Отчётов', fmt(k.reports)],
-  ['Таблиц-источников', fmt(k.tables)],
-  ['Связей', fmt(k.links)],
-  ['Таблиц без отчётов', fmt(k.orphans)],
-  ['Объём таблиц, МБ', fmt(k.total_mb, 1)],
-  ['Доля БД под отчётами', k.pct_of_db === null ? '—' : fmt(k.pct_of_db, 1) + '%'],
-  ['Через view', fmt(k.with_view)],
-  ['Время на отчёты, ч', fmt(k.hours, 1)],
-  ['Покрытие размерами', k.coverage === null ? '—' : fmt(k.coverage) + '%'],
-];
-document.getElementById('kpis').innerHTML = kpis
-  .map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`)
-  .join('');
+function drawKpis() {
+  const reports = DATA.reports.filter(inScope);
+  const sizes = DATA.sizes.filter(inScope);
+  document.getElementById('kpi-title').textContent =
+    'Показатели: ' + (rcSelect.value || 'по всем ТС и заводам');
+  const kpis = [
+    ['Отчётов', fmt(reports.length)],
+    ['Таблиц', fmt(uniqOf(sizes, 'full_name'))],
+    ['Объём таблиц, ГБ', fmt(sumOf(sizes, 'total_mb') / 1024, 1)],
+    ['Схем БД', fmt(uniqOf(sizes, 'schema_name'))],
+  ];
+  document.getElementById('kpis').innerHTML = kpis
+    .map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`)
+    .join('');
+}
 document.getElementById('meta').textContent =
   `собрано ${DATA.generated_at}` + (k.source_file ? ` из ${k.source_file}` : '');
 document.getElementById('foot').textContent =
@@ -247,11 +591,12 @@ document.getElementById('foot').textContent =
   + 'в нём не видны. Перед выводом отчёта проверяйте вручную.';
 
 /* --- Диаграмма топ-20 --------------------------------------------------- */
-(() => {
-  const rows = DATA.reports.slice(0, 20).filter(r => (r.gross_mb || 0) > 0);
+function drawTop() {
+  const rows = DATA.reports.filter(inScope)
+    .filter(r => (r.gross_mb || 0) > 0).slice(0, 20);
   const host = document.getElementById('chart-top');
   if (!rows.length) {
-    host.innerHTML = '<div class="empty">Диаграмма появится после загрузки размеров таблиц.</div>';
+    host.innerHTML = '<div class="empty">Нет данных по объёму в этом разрезе.</div>';
     return;
   }
   const max = Math.max(...rows.map(r => r.gross_mb || 0));
@@ -265,22 +610,30 @@ document.getElementById('foot').textContent =
       </div>
       <div class="val">${fmt(r.exclusive_mb, 1)} / ${fmt(r.gross_mb, 1)} МБ</div>`;
   }).join('');
-})();
-
-/* --- Таблицы ------------------------------------------------------------ */
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"]/g, c =>
-    ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 }
 
+/* --- Таблицы ------------------------------------------------------------ */
+const renderers = [];   // всё, что перерисовывается при смене РЦ
+const getters = {};     // текущая выборка каждой таблицы — для выгрузки CSV
+const COLS = {};
+
 function makeTable(opts) {
-  const { el, rows, cols, search, filter, filterField, filterLabel } = opts;
+  const { name, el, rows, cols, search, filter, filterField, filterLabel,
+          count, onPick, pickKey, rowsFn, onRender } = opts;
   const table = document.getElementById(el);
+  const counter = count ? document.getElementById(count) : null;
   let sortKey = cols.find(c => c.sort)?.key ?? cols[0].key;
   let sortDir = 'desc';
+  // Выбранная строка хранится ключом, а не ссылкой на объект: строки видов,
+  // которые пересчитываются на каждой перерисовке, каждый раз новые объекты,
+  // и сравнение по ссылке теряло бы выделение.
+  let pickedKey = null;
+
+  COLS[name] = cols;
 
   if (filter) {
-    const values = [...new Set(rows.map(r => r[filterField]).filter(v => v != null))].sort();
+    const values = [...new Set((rowsFn ? rowsFn() : rows)
+      .map(r => r[filterField]).filter(v => v != null))].sort();
     filter.innerHTML = `<option value="">${filterLabel}</option>`
       + values.map(v => `<option>${esc(v)}</option>`).join('');
     filter.onchange = render;
@@ -288,9 +641,11 @@ function makeTable(opts) {
   if (search) search.oninput = render;
 
   function current() {
+    const source = rowsFn ? rowsFn() : rows;
     const q = (search?.value || '').toLowerCase().trim();
     const f = filter?.value || '';
-    let out = rows.filter(r => {
+    const out = source.filter(r => {
+      if (!inScope(r)) return false;
       if (f && String(r[filterField]) !== f) return false;
       if (!q) return true;
       return cols.some(c => String(r[c.key] ?? '').toLowerCase().includes(q));
@@ -309,15 +664,21 @@ function makeTable(opts) {
 
   function render() {
     const data = current();
+    if (counter) counter.textContent = `строк: ${fmt(data.length)}`;
     const head = cols.map(c =>
       `<th data-key="${c.key}"${c.key === sortKey ? ` data-dir="${sortDir}"` : ''}>${esc(c.label)}</th>`
     ).join('');
-    const body = data.map(r => '<tr>' + cols.map(c => {
-      const v = r[c.key];
-      if (c.num) return `<td class="num">${fmt(v, c.dec)}</td>`;
-      if (c.bool) return `<td class="num">${v ? 'да' : '—'}</td>`;
-      return `<td class="${c.wide ? 'name' : ''}">${esc(v ?? '—')}</td>`;
-    }).join('') + '</tr>').join('');
+    const body = data.map((r, i) => {
+      const cls = onPick
+        ? ` class="pickable${r[pickKey] === pickedKey ? ' picked' : ''}" data-i="${i}"` : '';
+      return `<tr${cls}>` + cols.map(c => {
+        const v = r[c.key];
+        if (c.num) return `<td class="num">${fmt(v, c.dec)}</td>`;
+        if (c.bool) return `<td class="num">${v ? 'да' : '—'}</td>`;
+        if (c.pct) return `<td class="num">${v === null || v === undefined ? '—' : v + '%'}</td>`;
+        return `<td class="${c.wide ? 'name' : ''}">${esc(v ?? '—')}</td>`;
+      }).join('') + '</tr>';
+    }).join('');
     table.innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
     table.querySelectorAll('th').forEach(th => th.onclick = () => {
       const key = th.dataset.key;
@@ -325,12 +686,51 @@ function makeTable(opts) {
       else { sortKey = key; sortDir = 'desc'; }
       render();
     });
+    if (onPick) {
+      table.querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => {
+        const row = data[+tr.dataset.i];
+        // Повторный щелчок по той же строке снимает выбор.
+        const same = row[pickKey] === pickedKey;
+        pickedKey = same ? null : row[pickKey];
+        render();
+        onPick(same ? null : row);
+      });
+      // Строка могла уехать из выборки — тогда разбор под таблицей уже не о ней.
+      const still = data.find(r => r[pickKey] === pickedKey);
+      if (pickedKey !== null && !still) { pickedKey = null; onPick(null); }
+    }
+    if (onRender) onRender(data);
   }
 
   render();
-  return current;
+  renderers.push(render);
+  getters[name] = current;
 }
 
+/* --- Показатели над таблицей -------------------------------------------- */
+// Повторяют плитки st.metric соответствующей страницы приложения и считаются
+// по тому, что реально показано ниже, а не по всей базе.
+function tiles(hostId, items) {
+  const host = document.getElementById(hostId);
+  if (host) host.innerHTML = items.map(([l, v]) =>
+    `<div><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('');
+}
+const sumOf = (rows, key) => rows.reduce((s, r) => s + (r[key] || 0), 0);
+const hasAny = (rows, key) => rows.some(r => r[key] !== null && r[key] !== undefined);
+const uniqOf = (rows, key) => new Set(rows.map(r => r[key])).size;
+const countOf = (rows, fn) => rows.filter(fn).length;
+function medianOf(rows, key) {
+  const v = rows.map(r => r[key]).filter(x => x !== null && x !== undefined)
+    .sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+/* --- Наборы колонок ----------------------------------------------------- */
+// Колонки повторяют страницу «Объём и стоимость»: «Размер таблиц» и «Только
+// его» — суммы по настоящим таблицам, как в приложении. Столбец gross_mb
+// оставлен для тех, кто ищет именно его, с той же пометкой об опасности.
 const REPORT_COLS = [
   {key: 'report_no', label: '№'},
   {key: 'report_name', label: 'Отчёт', wide: true},
@@ -339,15 +739,96 @@ const REPORT_COLS = [
   {key: 'catalog_path', label: 'Каталог'},
   {key: 'uses_view', label: 'Через view', bool: true},
   {key: 'table_count', label: 'Таблиц', num: true},
-  {key: 'exclusive_mb', label: 'exclusive_mb', num: true, dec: 1, sort: true},
-  {key: 'shared_mb', label: 'shared_mb', num: true, dec: 1},
-  {key: 'gross_mb', label: 'gross_mb ⚠', num: true, dec: 1},
+  {key: 'tables_total_mb', label: 'Размер таблиц, МБ', num: true, dec: 1, sort: true},
+  {key: 'tables_exclusive_mb', label: 'Только его, МБ', num: true, dec: 1},
+  {key: 'tables_pct_of_db', label: 'Доля БД, %', num: true, dec: 3},
   {key: 'size_coverage_pct', label: 'Покрытие, %', num: true, dec: 1},
-  {key: 'exclusive_pct_of_db', label: 'Доля БД, %', num: true, dec: 1},
   {key: 'exec_count', label: 'Запусков', num: true},
   {key: 'avg_duration_sec', label: 'Ср. длит., с', num: true, dec: 1},
   {key: 'total_duration_sec', label: 'Всего времени, с', num: true},
   {key: 'quadrant', label: 'Квадрант'},
+  {key: 'gross_mb', label: 'gross_mb ⚠', num: true, dec: 1},
+  {key: 'table_names', label: 'Таблицы отчёта', wide: true},
+];
+const CARD_COLS = [
+  {key: 'report_no', label: '№'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'exclusive_mb', label: 'Только его, МБ', num: true, dec: 1, sort: true},
+  {key: 'exec_count', label: 'Запусков', num: true},
+  {key: 'catalog_path', label: 'Каталог'},
+];
+const SIZE_COLS = [
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'full_name', label: 'Таблица', wide: true},
+  {key: 'schema_name', label: 'Схема'},
+  {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1, sort: true},
+  {key: 'percent_of_total', label: 'Доля БД, %', num: true, dec: 1},
+  {key: 'row_count', label: 'Строк', num: true},
+  {key: 'retention_days', label: 'Глубина, дней', num: true},
+  {key: 'segment_count', label: 'Сегментов', num: true},
+  {key: 'report_count', label: 'Отчётов', num: true},
+];
+const RC2_COLS = [
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'full_name', label: 'Таблица', wide: true},
+  {key: 'schema_name', label: 'Схема'},
+  {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1, sort: true},
+  {key: 'retention_days', label: 'Глубина, дней', num: true},
+  {key: 'used_by', label: 'Отчётов у таблицы', num: true},
+];
+const RC2REP_COLS = [
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1, sort: true},
+  {key: 'retention_days', label: 'Глубина, дней', num: true},
+  {key: 'catalog_path', label: 'Каталог'},
+];
+const RC2TAB_COLS = [
+  {key: 'full_name', label: 'Таблица', wide: true},
+  {key: 'schema_name', label: 'Схема'},
+  {key: 'report_count', label: 'Отчётов', num: true, sort: true},
+  {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1},
+  {key: 'retention_days', label: 'Глубина, дней', num: true},
+];
+const RC3_COLS = [
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'full_name', label: 'Функция / процедура', wide: true},
+  {key: 'schema_name', label: 'Схема'},
+  {key: 'used_by', label: 'Отчётов у объекта', num: true, sort: true},
+];
+const USAGE_COLS = [
+  {key: 'report_no', label: '№'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'catalog_path', label: 'Каталог'},
+  {key: 'exec_count', label: 'Обращений', num: true, sort: true},
+  {key: 'distinct_users', label: 'Пользователей', num: true},
+  {key: 'avg_duration_sec', label: 'Ср. длит., с', num: true, dec: 1},
+  {key: 'total_duration_sec', label: 'Всего времени, с', num: true},
+  {key: 'usage_band', label: 'Группа по обращениям'},
+];
+const RETENTION_COLS = [
+  {key: 'report_no', label: '№'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'catalog_path', label: 'Каталог'},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'tables_with_retention', label: 'Из них с глубиной', num: true},
+  {key: 'retention_days', label: 'Глубина, дней', num: true, sort: true},
+  {key: 'retention_days_min', label: 'Минимум, дней', num: true},
+  {key: 'retention_band', label: 'Группа по глубине'},
 ];
 const CANDIDATE_COLS = [
   {key: 'report_no', label: '№'},
@@ -361,16 +842,6 @@ const CANDIDATE_COLS = [
   {key: 'exec_count', label: 'Запусков', num: true},
   {key: 'confidence', label: 'Уверенность'},
 ];
-const RETENTION_COLS = [
-  {key: 'report_no', label: '№'},
-  {key: 'report_name', label: 'Отчёт', wide: true},
-  {key: 'network', label: 'ТС'},
-  {key: 'plant', label: 'Завод'},
-  {key: 'catalog_path', label: 'Каталог'},
-  {key: 'table_count', label: 'Таблиц', num: true},
-  {key: 'retention_days', label: 'Глубина, дней', num: true, sort: true},
-  {key: 'retention_band', label: 'Группа по глубине'},
-];
 const DURATION_COLS = [
   {key: 'report_no', label: '№'},
   {key: 'report_name', label: 'Отчёт', wide: true},
@@ -382,6 +853,26 @@ const DURATION_COLS = [
   {key: 'total_duration_sec', label: 'Всего времени, с', num: true, sort: true},
   {key: 'duration_band', label: 'Длительность выборки'},
 ];
+const OVERLAP_COLS = [
+  {key: 'report_1', label: 'Отчёт 1', wide: true},
+  {key: 'plant_1', label: 'Завод 1'},
+  {key: 'report_2', label: 'Отчёт 2', wide: true},
+  {key: 'plant_2', label: 'Завод 2'},
+  {key: 'shared', label: 'Общих таблиц', num: true},
+  {key: 'tables_1', label: 'Таблиц у 1-го', num: true},
+  {key: 'tables_2', label: 'Таблиц у 2-го', num: true},
+  {key: 'jaccard_pct', label: 'Сходство', pct: true, sort: true},
+];
+const ABC_COLS = [
+  {key: 'abc', label: 'Группа'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'measure', label: 'Мера', num: true, dec: 1, sort: true},
+  {key: 'share_pct', label: 'Доля, %', num: true, dec: 2},
+  {key: 'cum_pct', label: 'Накоплено, %', num: true, dec: 1},
+  {key: 'catalog_path', label: 'Каталог'},
+];
 const TABLE_COLS = [
   {key: 'full_name', label: 'Таблица', wide: true},
   {key: 'schema_name', label: 'Схема'},
@@ -389,46 +880,436 @@ const TABLE_COLS = [
   {key: 'retention_days', label: 'Глубина, дней', num: true},
   {key: 'report_count', label: 'Отчётов', num: true, sort: true},
   {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1},
+  {key: 'plant_count', label: 'Заводов', num: true},
   {key: 'row_count', label: 'Строк', num: true},
   {key: 'is_orphan', label: 'Сирота', bool: true},
 ];
+// Схемы — таблицей, а не диаграммой: схем много, столбики уезжали бы далеко
+// вниз, а у части схем размер неизвестен — на диаграмме это пустое место.
+function schemaRows() {
+  const by = new Map();
+  for (const r of DATA.sizes.filter(inScope)) {
+    const key = String(r.schema_name ?? '—').toLowerCase();
+    let g = by.get(key);
+    if (!g) { g = {schema_name: key, tables: new Set(), total_mb: 0,
+                   percent_of_db: 0}; by.set(key, g); }
+    g.tables.add(r.full_name);
+    g.total_mb += r.total_mb || 0;
+    g.percent_of_db += r.percent_of_total || 0;
+  }
+  return [...by.values()]
+    .filter(g => g.total_mb > 0)
+    .map(g => ({schema_name: g.schema_name, table_count: g.tables.size,
+                total_mb: g.total_mb, percent_of_db: g.percent_of_db}));
+}
+const SCHEMA_COLS = [
+  {key: 'schema_name', label: 'Схема', wide: true},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1, sort: true},
+  {key: 'percent_of_db', label: 'Доля БД, %', num: true, dec: 2},
+];
+const RC_COLS = [
+  {key: 'network', label: 'ТС'},
+  {key: 'plant', label: 'Завод'},
+  {key: 'report_count', label: 'Отчётов', num: true, sort: true},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'view_count', label: 'View', num: true},
+  {key: 'matview_count', label: 'Mat.view', num: true},
+  {key: 'temp_count', label: 'Временных', num: true},
+  {key: 'routine_count', label: 'Функций', num: true},
+];
 
-const getters = {
-  reports: makeTable({
-    el: 't-reports', rows: DATA.reports, cols: REPORT_COLS,
-    search: document.getElementById('q-reports'),
-    filter: document.getElementById('f-folder'),
-    filterField: 'folder', filterLabel: 'Все папки',
-  }),
-  candidates: makeTable({
-    el: 't-candidates', rows: DATA.candidates, cols: CANDIDATE_COLS,
-    search: document.getElementById('q-candidates'),
-    filter: document.getElementById('f-confidence'),
-    filterField: 'confidence', filterLabel: 'Любая уверенность',
-  }),
-  retention: makeTable({
-    el: 't-retention', rows: DATA.retention, cols: RETENTION_COLS,
-    search: document.getElementById('q-retention'),
-    filter: document.getElementById('f-retention'),
-    filterField: 'retention_band', filterLabel: 'Любая глубина',
-  }),
-  durations: makeTable({
-    el: 't-durations', rows: DATA.durations, cols: DURATION_COLS,
-    search: document.getElementById('q-durations'),
-    filter: document.getElementById('f-band'),
-    filterField: 'duration_band', filterLabel: 'Любая длительность',
-  }),
-  tables: makeTable({
-    el: 't-tables', rows: DATA.tables, cols: TABLE_COLS,
-    search: document.getElementById('q-tables'),
-    filter: document.getElementById('f-schema'),
-    filterField: 'schema_name', filterLabel: 'Все схемы',
-  }),
-};
+/* --- ABC-анализ --------------------------------------------------------- */
+// Считается в браузере из того же списка отчётов: отдельные данные не нужны,
+// а мера переключается без пересборки файла.
+const measureSelect = document.getElementById('f-measure');
+function abcRows() {
+  const key = measureSelect.value;
+  const rows = DATA.reports
+    .filter(inScope)
+    .filter(r => (r[key] || 0) > 0)
+    .map(r => ({...r, measure: r[key]}))
+    .sort((a, b) => b.measure - a.measure);
+  const total = rows.reduce((s, r) => s + r.measure, 0);
+  let cum = 0;
+  rows.forEach((r, i) => {
+    r.share_pct = total ? 100 * r.measure / total : 0;
+    cum += r.share_pct;
+    r.cum_pct = cum;
+    // Первый отчёт всегда в A: если он один даёт больше 80%, условие
+    // «накоплено <= 80» его бы не поймало и группа A осталась бы пустой.
+    r.abc = i === 0 ? 'A' : (cum <= 80 ? 'A' : (cum <= 95 ? 'B' : 'C'));
+  });
+  return rows;
+}
+function drawAbcSummary() {
+  const rows = abcRows();
+  const total = rows.reduce((s, r) => s + r.measure, 0);
+  tiles('abc-summary', [['Всего отчётов', fmt(rows.length)]].concat(
+    ['A', 'B', 'C'].map(g => {
+      const grp = rows.filter(r => r.abc === g);
+      const sum = grp.reduce((s, r) => s + r.measure, 0);
+      const pct = total ? Math.round(100 * sum / total) : 0;
+      return [`Группа ${g} · ${pct}% меры`, `${fmt(grp.length)} отч.`];
+    })));
+}
 
-const COLS = {reports: REPORT_COLS, candidates: CANDIDATE_COLS,
-              durations: DURATION_COLS, retention: RETENTION_COLS,
-              tables: TABLE_COLS};
+/* --- Карточка отчёта ---------------------------------------------------- */
+function showCard(row) {
+  const host = document.getElementById('card-detail');
+  if (!row) {
+    host.innerHTML = '<div class="empty">Щёлкните по строке отчёта, '
+      + 'чтобы увидеть карточку.</div>';
+    return;
+  }
+  const objs = OBJECTS_BY_REPORT.get(row.report_id) || [];
+  const tables = objs.filter(o => o.object_kind === 'TABLE');
+  const routines = objs.filter(o => o.object_kind === 'ROUTINE');
+  const others = objs.filter(o => o.object_kind !== 'TABLE' && o.object_kind !== 'ROUTINE');
+
+  // Те же поля, что и в карточке приложения: счётчик и суммы — по настоящим
+  // таблицам, а не по всем объектам отчёта.
+  const metrics = [
+    ['Таблиц', fmt(row.table_count)],
+    ['Суммарный размер, МБ', fmt(row.tables_total_mb, 1)],
+    ['Только его, МБ', fmt(row.tables_exclusive_mb, 1)],
+    ['Запусков', fmt(row.exec_count)],
+    ['Ср. длительность, с', fmt(row.avg_duration_sec, 1)],
+    ['Глубина, дней', fmt(row.retention_days)],
+  ];
+
+  // Отчёты-соседи: те, кто делит с этим отчётом хотя бы одну таблицу.
+  const own = new Set(tables.map(t => t.full_name));
+  const neighbours = [];
+  for (const [rid, list] of OBJECTS_BY_REPORT) {
+    if (rid === row.report_id) continue;
+    const shared = list.filter(o => o.object_kind === 'TABLE' && own.has(o.full_name)).length;
+    if (shared) neighbours.push([rid, shared]);
+  }
+  neighbours.sort((a, b) => b[1] - a[1]);
+  const nb = neighbours.slice(0, 20).map(([rid, n]) => {
+    const r = REPORT_BY_ID.get(rid) || {};
+    return `<tr><td class="name">${esc(r.report_name)}</td><td>${esc(r.network)}</td>`
+      + `<td>${esc(r.plant)}</td><td class="num">${n}</td></tr>`;
+  }).join('');
+
+  const objHead = '<th>Объект</th><th>Схема</th><th>Объём, МБ</th>'
+    + '<th>Глубина, дней</th><th>Отчётов</th>';
+  const objTable = list => list.length
+    ? `<div class="scroll"><table><thead><tr>${objHead}</tr></thead><tbody>`
+      + list.map(o => `<tr><td class="name">${esc(o.full_name)}</td>`
+        + `<td>${esc(o.schema_name)}</td>`
+        + `<td class="num">${fmt(o.total_mb, 1)}</td>`
+        + `<td class="num">${fmt(o.retention_days)}</td>`
+        + `<td class="num">${fmt(o.used_by)}</td></tr>`).join('')
+      + '</tbody></table></div>'
+    : '<div class="empty">Не указано.</div>';
+
+  host.innerHTML = `
+    <div class="title">${esc(row.report_name)}</div>
+    <div class="path">№ ${esc(row.report_no ?? '—')} · ${esc(row.network)} ·
+      ${esc(row.plant)} · ${esc(row.catalog_path)}</div>
+    <div class="metrics">${metrics.map(([l, v]) =>
+      `<div><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('')}</div>
+    <h3>Таблицы (${tables.length})</h3>${objTable(tables)}
+    <h3>Функции и процедуры (${routines.length})</h3>${objTable(routines)}
+    <h3>Прочие объекты (${others.length})</h3>${objTable(others)}
+    <h3>Отчёты, использующие те же таблицы (${neighbours.length})</h3>
+    ${nb ? '<div class="scroll"><table><thead><tr><th>Отчёт</th><th>ТС</th>'
+      + `<th>Завод</th><th>Общих таблиц</th></tr></thead><tbody>${nb}</tbody></table></div>`
+      : '<div class="empty">Ни одна таблица этого отчёта не используется другими.</div>'}`;
+}
+
+/* --- Разбор строки в №2 ------------------------------------------------- */
+// Маленькая таблица для разборов: заголовки и ячейки задаются массивами, чтобы
+// не плодить почти одинаковую разметку в каждом разборе.
+function miniTable(head, rows) {
+  if (!rows.length) return '<div class="empty">Нет строк.</div>';
+  return '<div class="scroll"><table><thead><tr>'
+    + head.map(h => `<th>${esc(h[0])}</th>`).join('')
+    + '</tr></thead><tbody>'
+    + rows.map(r => '<tr>' + head.map((h, i) =>
+        `<td class="${h[1] === 'num' ? 'num' : (i === 0 ? 'name' : '')}">${r[i]}</td>`
+      ).join('') + '</tr>').join('')
+    + '</tbody></table></div>';
+}
+
+function showRc2Report(row) {
+  const host = document.getElementById('rc2rep-detail');
+  if (!row) {
+    host.innerHTML = '<div class="empty">Щёлкните по строке отчёта — '
+      + 'ниже появится разбор.</div>';
+    return;
+  }
+  const rows = rc2InScope().filter(r => r.report_id === row.report_id)
+    .sort((a, b) => (b.total_mb || 0) - (a.total_mb || 0));
+  const sizes = rows.map(r => r.total_mb).filter(v => v !== null && v !== undefined);
+  const noSize = rows.length - sizes.length;
+  const metrics = [
+    ['Таблиц-источников', fmt(row.table_count)],
+    ['Суммарный объём, МБ', fmt(row.total_mb, 1)],
+    ['Крупнейшая таблица, МБ', sizes.length ? fmt(Math.max(...sizes), 1) : '—'],
+    ['Глубина, дней', fmt(row.retention_days)],
+  ];
+  host.innerHTML = `
+    <div class="title">${esc(row.report_name)}</div>
+    <div class="path">${esc(row.network)} · ${esc(row.plant)} ·
+      ${esc(row.catalog_path)}</div>
+    <div class="metrics">${metrics.map(([l, v]) =>
+      `<div><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('')}</div>
+    ${noSize ? `<p class="note">У ${fmt(noSize)} из ${fmt(rows.length)} таблиц
+      отчёта нет размера в файле размеров — суммарный объём это нижняя
+      оценка.</p>` : ''}
+    ${miniTable(
+      [['Таблица'], ['Схема'], ['Объём, МБ', 'num'], ['Доля БД, %', 'num'],
+       ['Глубина, дней', 'num']],
+      rows.map(r => [esc(r.full_name), esc(r.schema_name), fmt(r.total_mb, 1),
+                     fmt(r.percent_of_total, 1), fmt(r.retention_days)]))}`;
+}
+
+function showRc2Table(row) {
+  const host = document.getElementById('rc2tab-detail');
+  if (!row) {
+    host.innerHTML = '<div class="empty">Щёлкните по строке таблицы — '
+      + 'ниже появится разбор.</div>';
+    return;
+  }
+  const rows = rc2InScope().filter(r => r.full_name === row.full_name);
+  const seen = new Set();
+  const reports = rows.filter(r => {
+    const k = `${r.report_name}|${r.network}|${r.plant}|${r.catalog_path}`;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  }).sort((a, b) => String(a.report_name).localeCompare(String(b.report_name), 'ru'));
+  const metrics = [
+    ['Отчётов', fmt(row.report_count)],
+    ['Объём, МБ', fmt(row.total_mb, 1)],
+    ['Заводов', fmt(uniqOf(rows, 'plant'))],
+    ['Глубина, дней', fmt(row.retention_days)],
+  ];
+  const verdict = row.report_count === 1
+    ? 'Таблицу использует один отчёт: при его выводе из эксплуатации её объём '
+      + 'освободится целиком.'
+    : `Таблицу использует ${fmt(row.report_count)} отчётов — изменение затронет `
+      + 'их все, а вывод одного отчёта места не освободит.';
+  host.innerHTML = `
+    <div class="title">${esc(row.full_name)}</div>
+    <div class="path">Схема: ${esc(row.schema_name)}</div>
+    <div class="metrics">${metrics.map(([l, v]) =>
+      `<div><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('')}</div>
+    <p class="note">${esc(verdict)}</p>
+    ${miniTable([['Отчёт'], ['ТС'], ['Завод'], ['Каталог']],
+      reports.map(r => [esc(r.report_name), esc(r.network), esc(r.plant),
+                        esc(r.catalog_path)]))}`;
+}
+
+/* --- Разбор пары похожих отчётов ---------------------------------------- */
+function showOverlap(row) {
+  const host = document.getElementById('overlap-detail');
+  if (!row) {
+    host.innerHTML = '<div class="empty">Щёлкните по паре, чтобы увидеть общие '
+      + 'и различающиеся таблицы.</div>';
+    return;
+  }
+  const setOf = id => new Set((OBJECTS_BY_REPORT.get(id) || [])
+    .filter(o => o.object_kind === 'TABLE').map(o => o.full_name));
+  const a = setOf(row.id1), b = setOf(row.id2);
+  const all = [...new Set([...a, ...b])].sort((x, y) => x.localeCompare(y, 'ru'));
+  const where = n => a.has(n) && b.has(n) ? 'у обоих'
+    : (a.has(n) ? 'только у 1-го' : 'только у 2-го');
+  const rows = all.map(n => [n, where(n)])
+    .sort((x, y) => x[1].localeCompare(y[1], 'ru') || x[0].localeCompare(y[0], 'ru'));
+  host.innerHTML = `
+    <div class="title">${esc(row.report_1)} ↔ ${esc(row.report_2)}</div>
+    <div class="path">${esc(row.network_1)} · ${esc(row.plant_1)} ·
+      ${esc(row.catalog_1)} — ${esc(row.network_2)} · ${esc(row.plant_2)} ·
+      ${esc(row.catalog_2)}</div>
+    ${row.exact ? '<p class="note">Отчёты ссылаются ровно на один и тот же '
+      + 'набор таблиц.</p>' : ''}
+    ${miniTable([['Таблица'], ['Есть у']],
+      rows.map(([n, w]) => [esc(n), esc(w)]))}`;
+}
+
+/* --- Сборка таблиц ------------------------------------------------------ */
+makeTable({name: 'rc', el: 't-rc', rows: DATA.rc, cols: RC_COLS});
+makeTable({name: 'schemas', el: 't-schemas', rowsFn: schemaRows, cols: SCHEMA_COLS});
+makeTable({name: 'sizes', el: 't-sizes', rows: DATA.sizes, cols: SIZE_COLS,
+  search: document.getElementById('q-sizes'), count: 'c-sizes',
+  filter: document.getElementById('f-sizes'), filterField: 'schema_name',
+  filterLabel: 'Все схемы',
+  onRender: d => tiles('m-sizes', [
+    ['Строк «таблица + завод»', fmt(d.length)],
+    ['Уникальных таблиц', fmt(uniqOf(d, 'full_name'))],
+    ['Суммарный объём, МБ', hasAny(d, 'total_mb') ? fmtInt(sumOf(d, 'total_mb')) : '—'],
+    // Считаем таблицы, а не строки: одна таблица даёт строку на каждый завод.
+    ['Не используются отчётами',
+     fmt(uniqOf(d.filter(r => !r.report_count), 'full_name'))],
+  ])});
+makeTable({name: 'rc2rep', el: 't-rc2rep', rowsFn: rc2ByReports, cols: RC2REP_COLS,
+  search: document.getElementById('q-rc2rep'), count: 'c-rc2rep',
+  onPick: showRc2Report, pickKey: 'report_id'});
+makeTable({name: 'rc2tab', el: 't-rc2tab', rowsFn: rc2ByTables, cols: RC2TAB_COLS,
+  search: document.getElementById('q-rc2tab'), count: 'c-rc2tab',
+  onPick: showRc2Table, pickKey: 'full_name'});
+makeTable({name: 'rc2', el: 't-rc2', rows: RC2_ROWS, cols: RC2_COLS,
+  search: document.getElementById('q-rc2'), count: 'c-rc2',
+  onRender: d => tiles('m-rc2', [
+    ['Отчётов', fmt(uniqOf(d, 'report_id'))],
+    ['Уникальных таблиц', fmt(uniqOf(d, 'full_name'))],
+    ['Таблиц на отчёт', d.length ? fmt(d.length / uniqOf(d, 'report_id'), 1) : '—'],
+  ])});
+makeTable({name: 'rc3', el: 't-rc3', rows: RC3_ROWS, cols: RC3_COLS,
+  search: document.getElementById('q-rc3'), count: 'c-rc3',
+  onRender: d => tiles('m-rc3', [
+    ['Связей отчёт → процедура', fmt(d.length)],
+    ['Отчётов', fmt(uniqOf(d, 'report_id'))],
+    ['Уникальных процедур', fmt(uniqOf(d, 'full_name'))],
+  ])});
+makeTable({name: 'usage', el: 't-usage', rows: DATA.usage, cols: USAGE_COLS,
+  search: document.getElementById('q-usage'), count: 'c-usage',
+  filter: document.getElementById('f-usage'), filterField: 'usage_band',
+  filterLabel: 'Любая группа',
+  onRender: d => tiles('m-usage', [
+    ['Отчётов', fmt(d.length)],
+    ['Всего обращений', hasAny(d, 'exec_count') ? fmtInt(sumOf(d, 'exec_count')) : '—'],
+    ['Не запускались', fmt(countOf(d, r => r.exec_count === 0))],
+    ['Без данных', fmt(countOf(d, r => r.exec_count === null
+                                    || r.exec_count === undefined))],
+  ])});
+makeTable({name: 'retention', el: 't-retention', rows: DATA.retention,
+  cols: RETENTION_COLS, search: document.getElementById('q-retention'),
+  count: 'c-retention', filter: document.getElementById('f-retention'),
+  filterField: 'retention_band', filterLabel: 'Любая глубина',
+  onRender: d => tiles('m-retention', [
+    ['Более 45 дней', fmt(countOf(d, r => r.retention_band === 'Более 45 дней'))],
+    ['От 31 до 45 дней', fmt(countOf(d, r => r.retention_band === 'От 31 до 45 дней'))],
+    ['Медиана, дней', fmtInt(medianOf(d, 'retention_days'))],
+    ['Без глубины', fmt(countOf(d, r => r.retention_days === null
+                                     || r.retention_days === undefined))],
+  ])});
+makeTable({name: 'card', el: 't-card', rows: DATA.reports, cols: CARD_COLS,
+  search: document.getElementById('q-card'), count: 'c-card',
+  onPick: showCard, pickKey: 'report_id'});
+makeTable({name: 'reports', el: 't-reports', rows: DATA.reports, cols: REPORT_COLS,
+  search: document.getElementById('q-reports'), count: 'c-reports',
+  filter: document.getElementById('f-folder'), filterField: 'folder',
+  filterLabel: 'Все папки',
+  onRender: d => tiles('m-reports', [
+    ['Отчётов', fmt(d.length)],
+    ['Освободится, МБ', fmtInt(sumOf(d, 'tables_exclusive_mb'))],
+    ['Доля БД', d.length ? fmt(sumOf(d, 'tables_pct_of_db'), 2) + '%' : '—'],
+    ['Таблиц на отчёт, среднее',
+     d.length ? fmt(sumOf(d, 'table_count') / d.length, 1) : '—'],
+  ])});
+makeTable({name: 'durations', el: 't-durations', rows: DATA.durations,
+  cols: DURATION_COLS, search: document.getElementById('q-durations'),
+  count: 'c-durations', filter: document.getElementById('f-band'),
+  filterField: 'duration_band', filterLabel: 'Любая длительность',
+  onRender: d => tiles('m-durations', [
+    ['Суммарное время, ч', fmt(sumOf(d, 'total_duration_sec') / 3600, 1)],
+    ['Медианная длительность, с', fmt(medianOf(d, 'avg_duration_sec'), 1)],
+    ['Дольше минуты', fmt(countOf(d, r => (r.avg_duration_sec || 0) >= 60))],
+  ])});
+makeTable({name: 'candidates', el: 't-candidates', rows: DATA.candidates,
+  cols: CANDIDATE_COLS, search: document.getElementById('q-candidates'),
+  count: 'c-candidates', filter: document.getElementById('f-confidence'),
+  filterField: 'confidence', filterLabel: 'Любая уверенность',
+  onRender: d => tiles('m-candidates', [
+    ['Кандидатов', fmt(d.length)],
+    ['Освободится, МБ', fmtInt(sumOf(d, 'exclusive_mb'))],
+    ['С высокой уверенностью', fmt(countOf(d, r => r.confidence === 'Высокая'))],
+  ])});
+makeTable({name: 'overlap', el: 't-overlap', rows: OVERLAP_ROWS, cols: OVERLAP_COLS,
+  search: document.getElementById('q-overlap'), count: 'c-overlap',
+  onPick: showOverlap, pickKey: 'pair_key',
+  onRender: d => tiles('m-overlap', [
+    ['Показано пар', fmt(d.length)],
+    ['Точных совпадений', fmt(countOf(d, r => r.exact))],
+    ['Разных заводов', fmt(countOf(d, r => r.plant_1 !== r.plant_2))],
+  ])});
+makeTable({name: 'abc', el: 't-abc', rowsFn: abcRows, cols: ABC_COLS,
+  search: document.getElementById('q-abc'), count: 'c-abc'});
+makeTable({name: 'tables', el: 't-tables', rows: DATA.tables, cols: TABLE_COLS,
+  search: document.getElementById('q-tables'), count: 'c-tables',
+  filter: document.getElementById('f-schema'), filterField: 'schema_name',
+  filterLabel: 'Все схемы',
+  onRender: d => tiles('m-tables', [
+    ['Объектов', fmt(d.length)],
+    ['Из них «сирот»', fmt(countOf(d, r => r.is_orphan))],
+    ['Суммарный объём, МБ', hasAny(d, 'total_mb') ? fmtInt(sumOf(d, 'total_mb')) : '—'],
+    ['Доля БД, %', hasAny(d, 'percent_of_total')
+      ? fmt(sumOf(d, 'percent_of_total'), 2) : '—'],
+  ])});
+
+function redrawAll() {
+  renderers.forEach(fn => fn());
+  drawKpis();
+  drawTop();
+  drawAbcSummary();
+}
+
+drawKpis();
+showCard(null);
+showRc2Report(null);
+showRc2Table(null);
+showOverlap(null);
+drawTop();
+drawAbcSummary();
+
+measureSelect.onchange = redrawAll;
+// Выбранную строку не сбрасываем: если отчёт остался в разрезе, разбор о нём
+// по-прежнему верен, а если уехал — makeTable снимет выбор сам.
+rcSelect.onchange = redrawAll;
+
+/* --- Вложенные виды ----------------------------------------------------- */
+document.querySelectorAll('nav.subtabs').forEach(nav => {
+  const section = nav.closest('section');
+  const buttons = [...nav.querySelectorAll('button')];
+  const open = id => {
+    section.querySelectorAll(':scope > div[data-sub]').forEach(d => {
+      d.hidden = d.dataset.sub !== id;
+    });
+    buttons.forEach(b => b.setAttribute('aria-selected', String(b.dataset.sub === id)));
+  };
+  buttons.forEach(b => b.onclick = () => open(b.dataset.sub));
+  open(buttons[0].dataset.sub);
+});
+
+/* --- Вкладки ------------------------------------------------------------ */
+const TABS = [
+  ['Данные', [['overview', 'Обзор']]],
+  ['Аналитика РЦ', [
+    ['rc1', '№1 Таблицы и размеры'], ['rc2', '№2 Отчёт → таблицы'],
+    ['rc3', '№3 Отчёт → функции'], ['rc4', '№4 Отчёт → обращения'],
+    ['rc5', '№5 Глубина хранения'],
+  ]],
+  ['Отчёты', [
+    ['card', 'Карточка отчёта'], ['cost', 'Объём и стоимость'],
+    ['candidates', 'Кандидаты на вывод'], ['overlap', 'Похожие отчёты'],
+    ['abc', 'ABC-анализ'],
+  ]],
+  ['Справочники', [['tables', 'Таблицы']]],
+];
+const nav = document.getElementById('tabs');
+nav.innerHTML = TABS.map(([group, items]) =>
+  `<span class="grp">${esc(group)}</span>` + items.map(([id, label]) =>
+    `<button type="button" data-tab="${id}" aria-selected="false">${esc(label)}</button>`
+  ).join('')).join('');
+
+const TAB_IDS = new Set(TABS.flatMap(([, items]) => items.map(([id]) => id)));
+
+function openTab(id) {
+  if (!TAB_IDS.has(id)) id = 'overview';
+  document.querySelectorAll('section[data-tab]').forEach(s => {
+    s.hidden = s.dataset.tab !== id;
+  });
+  nav.querySelectorAll('button').forEach(b => {
+    b.setAttribute('aria-selected', String(b.dataset.tab === id));
+  });
+  history.replaceState(null, '', '#' + id);
+}
+nav.querySelectorAll('button').forEach(b => b.onclick = () => openTab(b.dataset.tab));
+openTab((location.hash || '#overview').slice(1));
 
 /* --- Выгрузка текущей выборки в CSV ------------------------------------- */
 document.querySelectorAll('button.csv').forEach(btn => {
