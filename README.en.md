@@ -21,6 +21,7 @@ and what would actually be freed if the report were decommissioned.**
 | [`docs/RUNBOOK.en.md`](docs/RUNBOOK.en.md) | **Step-by-step start** for each option, and loading data |
 | [`docs/ARCHITECTURE.en.md`](docs/ARCHITECTURE.en.md) | Components: what the solution is made of |
 | [`docs/TZ.en.md`](docs/TZ.en.md) | Specification — the source of truth for the project |
+| [`CHANGELOG.en.md`](CHANGELOG.en.md) | Changelog: what changed and when |
 | [`CLAUDE.md`](CLAUDE.md) | Working rules for the AI agent (Russian only — it is the agent's brief) |
 
 ---

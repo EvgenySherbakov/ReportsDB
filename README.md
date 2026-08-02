@@ -23,6 +23,7 @@ Excel-выгрузка по отчётам SSRS превращается в ло
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) · [en](docs/RUNBOOK.en.md) | **Пошаговый запуск** каждого варианта и загрузка данных |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [en](docs/ARCHITECTURE.en.md) | Компоненты решения: что из чего состоит |
 | [`docs/TZ.md`](docs/TZ.md) · [en](docs/TZ.en.md) | Техническое задание — источник истины по проекту |
+| [`CHANGELOG.md`](CHANGELOG.md) · [en](CHANGELOG.en.md) | История версий: что изменилось и когда |
 | [`CLAUDE.md`](CLAUDE.md) | Правила работы над проектом для AI-агента (только по-русски — это его инструкция) |
 
 ---

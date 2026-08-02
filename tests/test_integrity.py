@@ -502,6 +502,7 @@ def test_raw_data_is_git_ignored():
 # Русский файл — оригинал, английский лежит рядом с суффиксом .en.
 BILINGUAL_DOCS = [
     (ROOT / "README.md", ROOT / "README.en.md"),
+    (ROOT / "CHANGELOG.md", ROOT / "CHANGELOG.en.md"),
     (ROOT / "docs" / "RUNBOOK.md", ROOT / "docs" / "RUNBOOK.en.md"),
     (ROOT / "docs" / "ARCHITECTURE.md", ROOT / "docs" / "ARCHITECTURE.en.md"),
     (ROOT / "docs" / "TZ.md", ROOT / "docs" / "TZ.en.md"),
@@ -545,6 +546,39 @@ def test_documents_link_to_each_other(ru, en):
     """Переключатель языка есть в обоих файлах, иначе перевод не найти."""
     assert en.name in ru.read_text(encoding="utf-8")
     assert ru.name in en.read_text(encoding="utf-8")
+
+
+def test_version_is_the_same_everywhere():
+    """`pyproject.toml` и `config.VERSION` обязаны совпадать.
+
+    VERSION пишется в `etl_run.tool_version`, то есть по любой базе видно,
+    каким кодом она собрана. Если версии разъедутся, эта запись начнёт врать —
+    а именно по ней разбираются, почему у двух людей разные цифры.
+    """
+    import re
+
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    declared = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
+    assert declared, "в pyproject.toml нет version"
+
+    from reportsdb.config import VERSION
+
+    assert declared.group(1) == VERSION, (
+        f"pyproject.toml обещает {declared.group(1)}, "
+        f"а config.VERSION равен {VERSION}"
+    )
+
+
+def test_changelog_mentions_the_current_version():
+    """Версия выпущена — значит, о ней написано в истории версий.
+
+    Обе языковые версии: иначе английский CHANGELOG отстаёт молча.
+    """
+    from reportsdb.config import VERSION
+
+    for name in ("CHANGELOG.md", "CHANGELOG.en.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert f"[{VERSION}]" in text, f"{name}: нет раздела про версию {VERSION}"
 
 
 def test_decision_journal_is_kept_in_both_languages():

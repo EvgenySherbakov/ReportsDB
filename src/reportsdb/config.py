@@ -8,7 +8,10 @@ from typing import Any
 
 import yaml
 
-VERSION = "0.2.0"
+# Версия программы. Пишется в etl_run.tool_version, поэтому по любой базе
+# видно, каким кодом она собрана. Должна совпадать с version в pyproject.toml —
+# за этим следит test_version_is_the_same_everywhere.
+VERSION = "1.0.0"
 
 # Версия структуры БД. Поднимать при КАЖДОМ изменении sql/01_schema.sql или
 # sql/02_views.sql. Приложение сравнивает её с версией в файле базы и, если та
