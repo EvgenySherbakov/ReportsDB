@@ -137,12 +137,12 @@ def build(
     # ссылок отчётов, где схема не указана. Индекс строится до загрузки
     # отчётов — файл читается отдельно от основного прохода _load_table_sizes,
     # чтобы не завязывать один шаг на внутреннее устройство другого.
-    schema_index = _schema_recovery_index(mapping.table_sizes)
+    sizes_index = _sizes_index(mapping.table_sizes)
 
     con = duckdb.connect(str(db_path))
     try:
         _run_sql_file(con, SQL_DIR / "01_schema.sql")
-        _load_reports(con, sources, mapping.reports, stats, schema_index)
+        _load_reports(con, sources, mapping.reports, stats, sizes_index)
         _load_table_sizes(con, mapping.table_sizes, stats)
         _load_report_usage(con, mapping.report_usage, stats)
         _run_sql_file(con, SQL_DIR / "02_views.sql")
@@ -171,18 +171,33 @@ def build(
     return stats
 
 
-def _schema_recovery_index(section: SectionConfig) -> dict[str, str]:
-    """Имя таблицы (в нижнем регистре) → её схема, если она единственная.
+@dataclass
+class SizesIndex:
+    """Что известно про объекты из файла размеров ещё до разбора отчётов."""
 
-    Строится из файла размеров: там перечислены все таблицы БД со схемами,
-    независимо от того, ссылается ли на них хоть один отчёт. Если одно и то
-    же имя таблицы встречается под разными схемами (например, «Orders» есть
-    и в dbo, и в sales), восстановить схему нельзя — такое имя в индекс не
-    попадает, и ссылка на него в отчёте останется «(unknown)».
+    #: имя таблицы (в нижнем регистре) → схема, если она единственная
+    schema_by_name: dict[str, str] = field(default_factory=dict)
+    #: все имена из файла размеров — у этих объектов есть сегменты в БД
+    stored_names: set[str] = field(default_factory=set)
 
-    Индекс строится сразу по всем файлам размеров: имя, однозначное в одном
-    файле, но встречающееся под другой схемой в файле соседнего завода, —
-    неоднозначно, и схему по нему восстанавливать нельзя.
+
+def _sizes_index(section: SectionConfig) -> SizesIndex:
+    """Схемы и имена объектов из файла размеров.
+
+    **Схема.** Имя таблицы → её схема, если та единственная. В файле размеров
+    перечислены все таблицы БД со схемами, независимо от того, ссылается ли на
+    них хоть один отчёт. Если одно и то же имя встречается под разными схемами
+    (например, «Orders» есть и в dbo, и в sales), восстановить схему нельзя —
+    такое имя в индекс не попадает, и ссылка на него в отчёте останется
+    «(unknown)». Индекс строится сразу по всем файлам размеров: имя,
+    однозначное в одном файле, но встречающееся под другой схемой в файле
+    соседнего завода, — неоднозначно.
+
+    **Имена.** Отдельно собираются все имена файла размеров, включая
+    неоднозначные. У этих объектов есть сегменты, то есть они физически
+    хранятся, — значит это таблицы, как бы они ни назывались. Маска имени
+    (`V_*` → view) к ним не применяется: иначе таблица с именем на «v_»
+    выпала бы из таблицы №2 и из расчёта объёма.
     """
     paths = []
     for name in section.files:
@@ -192,11 +207,12 @@ def _schema_recovery_index(section: SectionConfig) -> dict[str, str]:
         if path.exists():
             paths.append(path)
     if not paths:
-        return {}
+        return SizesIndex()
 
     df = read_all(paths, section)
     cols = resolve_columns(list(df.columns), section.columns)
 
+    index = SizesIndex()
     candidates: dict[str, set[str]] = {}
     for _, row in df.iterrows():
         full = clean_text(_cell(row, cols.get("full_name")))
@@ -211,12 +227,15 @@ def _schema_recovery_index(section: SectionConfig) -> dict[str, str]:
         if parsed is None:
             continue
         obj_schema, obj_name, parsed_ok = parsed
+        index.stored_names.add(obj_name.lower())
         if not parsed_ok:
             continue  # сама запись в файле размеров без схемы — не источник
         candidates.setdefault(obj_name.lower(), set()).add(obj_schema.lower())
 
-    return {name: next(iter(schemas)) for name, schemas in candidates.items()
-            if len(schemas) == 1}
+    index.schema_by_name = {name: next(iter(schemas))
+                            for name, schemas in candidates.items()
+                            if len(schemas) == 1}
+    return index
 
 
 def _load_reports(
@@ -224,9 +243,9 @@ def _load_reports(
     source: Path | list[Path],
     section: SectionConfig,
     stats: LoadStats,
-    schema_index: dict[str, str] | None = None,
+    sizes_index: SizesIndex | None = None,
 ) -> None:
-    schema_index = schema_index or {}
+    sizes_index = sizes_index or SizesIndex()
     sources = [source] if isinstance(source, Path) else list(source)
     # Файлы склеиваются до разбора, а не грузятся по очереди: сквозная
     # нумерация report_id и table_id ведётся по всему набору, и загрузка
@@ -323,7 +342,14 @@ def _load_reports(
                 _cell(row, column), section.table_separator
             ):
                 if field_name == "source_tables":
-                    guessed = match_object_kind(table_name, section.object_patterns)
+                    # Маска имени — последняя догадка, и только для объектов,
+                    # которых нет в файле размеров: наличие сегментов значит,
+                    # что объект физически хранится, то есть это таблица, как
+                    # бы она ни называлась.
+                    guessed = (
+                        None if table_name.lower() in sizes_index.stored_names
+                        else match_object_kind(table_name, section.object_patterns)
+                    )
                     obj_kind = guessed or "TABLE"
                     origin = "маска" if guessed else "по умолчанию"
                 else:
@@ -334,7 +360,7 @@ def _load_reports(
                 # единственное: неоднозначную догадку выдавать за факт нельзя.
                 schema_source = "ссылка"
                 if not ok:
-                    recovered = schema_index.get(table_name.lower())
+                    recovered = sizes_index.schema_by_name.get(table_name.lower())
                     if recovered:
                         schema_name, schema_source = recovered, "файл размеров"
                     else:

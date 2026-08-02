@@ -295,7 +295,7 @@ LABELS = {
     "report_count": "Отчётов",
     "row_count": "Строк",
     "total_mb": "Объём, МБ",
-    "is_orphan": "Сирота",
+    "is_orphan": "Не используется отчётами",
     "is_parsed_ok": "Схема распознана",
     "schema_source": "Схема определена",
     "reports": "Зависимые отчёты",
@@ -303,6 +303,39 @@ LABELS = {
 
 # Технические ключи: в таблицах не показываем, в CSV они не нужны тоже.
 TECHNICAL = ["report_id", "table_id"]
+
+# Типы объектов по-русски. В базе они хранятся английскими кодами (так их
+# видно из любого SQL-клиента), а в интерфейсе показываются словами.
+OBJECT_KINDS = {
+    "TABLE": "Таблица",
+    "VIEW": "View (представление)",
+    "MATERIALIZED VIEW": "Mat.view (материализованное)",
+    "TEMP": "Временная",
+    "ROUTINE": "Функция / процедура",
+}
+
+
+def plural(count: int, one: str, few: str, many: str) -> str:
+    """«1 отчёт», «2 отчёта», «5 отчётов» — русское согласование с числом.
+
+    Без него в интерфейсе попадаются «23 отчётов» и «33 отчётов»: мелочь,
+    которая читается как небрежность ровно там, где нужно доверие к цифрам.
+    """
+    n = abs(int(count))
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def reports_word(count: int) -> str:
+    return plural(count, "отчёт", "отчёта", "отчётов")
+
+
+def kind_ru(kind: str | None) -> str:
+    """Русское название типа объекта; незнакомый код возвращается как есть."""
+    return OBJECT_KINDS.get(kind, kind or "—")
 
 
 def show_table(df: pd.DataFrame, extra: dict | None = None, **kwargs) -> pd.DataFrame:

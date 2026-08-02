@@ -539,8 +539,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 9.
-    expected = "3c7152"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 10.
+    expected = "8e5711"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -912,9 +912,61 @@ def test_report_summary_covers_every_report(full_db):
     assert rows == reports
 
 
-def test_object_kind_masks_are_off_by_default():
-    """Маски имён по умолчанию пусты: угаданный тип молча выкинул бы таблицу."""
-    assert load_mapping().reports.object_patterns == {}
+def test_only_the_view_prefix_mask_is_enabled():
+    """Из масок имён включена ровно одна — префикс представления.
+
+    Каждая маска — догадка о типе объекта, а неверно угаданный тип молча
+    выкидывает таблицу из таблицы №2 и из расчёта объёма. Поэтому список
+    закреплён тестом: новая маска добавляется осознанно, а не мимоходом.
+    """
+    assert load_mapping().reports.object_patterns == {"VIEW": ["V_*", "VW_*"]}
+
+
+def test_view_prefix_recognised_but_never_overrides_real_tables(tmp_path):
+    """Маска `v_` делает объект представлением — кроме тех, что есть в базе.
+
+    Имя, начинающееся с «v_», почти всегда представление, и в справочнике его
+    надо видеть отдельно от таблиц. Но если у объекта есть сегменты в файле
+    размеров, значит он физически хранится, — это таблица, как бы она ни
+    называлась, и маску к ней применять нельзя.
+    """
+    import pandas as pd
+
+    reports = tmp_path / "reports.xlsx"
+    pd.DataFrame([{
+        "№": "1", "ТС": "СЕТЬ", "Завод": "З-1",
+        "Каталог 1-го уровня": "Папка", "Наименование отчета": "Отчёт",
+        # Все три объекта перечислены в колонке ТАБЛИЦ — то есть тип не задан
+        # явно и решать его должна маска.
+        "Таблицы источники данных": "dbo.orders; dbo.v_summary; dbo.v_stored",
+    }]).to_excel(reports, index=False)
+
+    sizes = tmp_path / "sizes.xlsx"
+    pd.DataFrame([
+        {"OWNER": "dbo", "SEGMENT_NAME": "orders", "SEGMENT_TYPE": "TABLE",
+         "SIZE_MB": "10"},
+        # Физически хранится, хотя и названо как представление.
+        {"OWNER": "dbo", "SEGMENT_NAME": "v_stored", "SEGMENT_TYPE": "TABLE",
+         "SIZE_MB": "20"},
+    ]).to_excel(sizes, index=False)
+
+    mapping = load_mapping()
+    mapping.table_sizes.files = [str(sizes)]
+    mapping.report_usage.files = []
+    db = tmp_path / "kinds.duckdb"
+    build(reports, db, mapping)
+
+    con = duckdb.connect(str(db), read_only=True)
+    kinds = dict(con.execute(
+        "SELECT full_name, object_kind || '/' || kind_source FROM dim_table"
+    ).fetchall())
+    con.close()
+
+    assert kinds["dbo.orders"].startswith("TABLE")
+    assert kinds["dbo.v_summary"] == "VIEW/маска"
+    assert kinds["dbo.v_stored"].startswith("TABLE"), (
+        "объект с сегментами в файле размеров обязан остаться таблицей"
+    )
 
 
 # --- Витрины на пустых фактах --------------------------------------------

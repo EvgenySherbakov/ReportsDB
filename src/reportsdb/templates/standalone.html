@@ -200,7 +200,7 @@
     освободится при выводе отчёта, — <b>exclusive_mb</b>: таблицы, которых не
     касается больше ни один отчёт.
   </p>
-  <h3>Сводка по РЦ</h3>
+  <h3>Сравнение РЦ</h3>
   <div class="scroll"><table id="t-rc"></table></div>
   <h3>Схемы БД</h3>
   <div class="scroll tall"><table id="t-schemas"></table></div>
@@ -402,7 +402,8 @@
   <div class="controls">
     <label class="count" for="f-measure">Мера</label>
     <select id="f-measure">
-      <option value="exclusive_mb">Объём данных (эксклюзивный), МБ</option>
+      <option value="gross_mb">Объём таблиц отчёта, МБ</option>
+      <option value="exclusive_mb">Освободится при выводе, МБ</option>
       <option value="exec_count">Число обращений</option>
       <option value="total_duration_sec">Суммарное время выполнения, с</option>
     </select>
@@ -410,20 +411,23 @@
     <span class="count" id="c-abc"></span>
     <button class="csv" data-csv="abc">Выгрузить CSV</button>
   </div>
+  <p class="hint" id="abc-help"></p>
   <div class="metrics" id="abc-summary"></div>
+  <p class="note" id="abc-skipped" hidden></p>
   <div class="scroll tall"><table id="t-abc"></table></div>
 </section>
 
 <!-- ===================== Справочники ==================== -->
 <section data-tab="tables" hidden>
-  <h2>Таблицы-источники</h2>
-  <p class="hint">Какая таблица в скольких отчётах используется и что сломается
-  при её изменении. Разрез по РЦ к этому справочнику не применяется: таблица
-  общая для всех заводов.</p>
+  <h2>Объекты-источники</h2>
+  <p class="hint">Таблицы, представления (view), материализованные view,
+  временные таблицы, функции и процедуры: в скольких отчётах используется
+  каждый и что сломается при его изменении. Разрез по РЦ к этому справочнику
+  не применяется — объект общий для всех заводов.</p>
   <div class="metrics" id="m-tables"></div>
   <div class="controls">
-    <input type="search" id="q-tables" placeholder="Поиск по имени таблицы…">
-    <select id="f-schema"></select>
+    <input type="search" id="q-tables" placeholder="Поиск по имени объекта…">
+    <select id="f-kind"></select>
     <span class="count" id="c-tables"></span>
     <button class="csv" data-csv="tables">Выгрузить CSV</button>
   </div>
@@ -463,6 +467,27 @@ document.getElementById('theme').onclick = () => {
 // Связи несут только report_id — имя, сеть и завод подставляются отсюда. Так
 // строки связей не тащат за собой повторяющиеся строковые поля: на тысячах
 // связей это разница в разы по размеру файла.
+// Типы объектов в базе хранятся английскими кодами — так их видно из любого
+// SQL-клиента. В интерфейсе показываются словами.
+const OBJECT_KINDS = {
+  'TABLE': 'Таблица',
+  'VIEW': 'View (представление)',
+  'MATERIALIZED VIEW': 'Mat.view (материализованное)',
+  'TEMP': 'Временная',
+  'ROUTINE': 'Функция / процедура',
+};
+const kindRu = k => OBJECT_KINDS[k] || k || '—';
+// «23 отчётов» вместо «23 отчёта» читается как небрежность ровно там, где
+// нужно доверие к цифрам.
+function plural(n, one, few, many) {
+  const a = Math.abs(Math.round(n));
+  if (a % 10 === 1 && a % 100 !== 11) return one;
+  if (a % 10 >= 2 && a % 10 <= 4 && !(a % 100 >= 12 && a % 100 <= 14)) return few;
+  return many;
+}
+const reportsWord = n => plural(n, 'отчёт', 'отчёта', 'отчётов');
+for (const t of DATA.tables) t.kind_ru = kindRu(t.object_kind);
+
 const REPORT_BY_ID = new Map(DATA.reports.map(r => [r.report_id, r]));
 const OBJECTS_BY_REPORT = new Map();
 for (const o of DATA.objects) {
@@ -874,15 +899,16 @@ const ABC_COLS = [
   {key: 'catalog_path', label: 'Каталог'},
 ];
 const TABLE_COLS = [
-  {key: 'full_name', label: 'Таблица', wide: true},
+  {key: 'full_name', label: 'Объект', wide: true},
   {key: 'schema_name', label: 'Схема'},
-  {key: 'object_kind', label: 'Тип объекта'},
+  {key: 'kind_ru', label: 'Тип объекта'},
+  {key: 'kind_source', label: 'Тип определён'},
   {key: 'retention_days', label: 'Глубина, дней', num: true},
   {key: 'report_count', label: 'Отчётов', num: true, sort: true},
   {key: 'total_mb', label: 'Объём, МБ', num: true, dec: 1},
   {key: 'plant_count', label: 'Заводов', num: true},
   {key: 'row_count', label: 'Строк', num: true},
-  {key: 'is_orphan', label: 'Сирота', bool: true},
+  {key: 'is_orphan', label: 'Не используется отчётами', bool: true},
 ];
 // Схемы — таблицей, а не диаграммой: схем много, столбики уезжали бы далеко
 // вниз, а у части схем размер неизвестен — на диаграмме это пустое место.
@@ -911,12 +937,20 @@ const SCHEMA_COLS = [
 const RC_COLS = [
   {key: 'network', label: 'ТС'},
   {key: 'plant', label: 'Завод'},
-  {key: 'report_count', label: 'Отчётов', num: true, sort: true},
-  {key: 'table_count', label: 'Таблиц', num: true},
-  {key: 'view_count', label: 'View', num: true},
-  {key: 'matview_count', label: 'Mat.view', num: true},
-  {key: 'temp_count', label: 'Временных', num: true},
-  {key: 'routine_count', label: 'Функций', num: true},
+  {key: 'report_count', label: 'Отчётов', num: true},
+  {key: 'reports_with_view', label: 'Из них через view', num: true},
+  {key: 'db_table_count', label: 'Таблиц в базе', num: true},
+  {key: 'db_total_mb', label: 'Объём базы, МБ', num: true, sort: true},
+  {key: 'used_table_count', label: 'Таблиц под отчётами', num: true},
+  {key: 'used_mb', label: 'Под отчётами, МБ', num: true},
+  {key: 'used_pct_of_plant', label: 'Под отчётами, %', num: true, dec: 1},
+  {key: 'unused_table_count', label: 'Таблиц без отчётов', num: true},
+  {key: 'unused_mb', label: 'Без отчётов, МБ', num: true},
+  {key: 'mb_per_report', label: 'МБ на отчёт', num: true},
+  {key: 'schema_count', label: 'Схем', num: true},
+  {key: 'median_retention_days', label: 'Глубина, медиана', num: true},
+  {key: 'exec_count', label: 'Обращений', num: true},
+  {key: 'total_duration_sec', label: 'Суммарное время, с', num: true},
 ];
 
 /* --- ABC-анализ --------------------------------------------------------- */
@@ -942,9 +976,41 @@ function abcRows() {
   });
   return rows;
 }
+// Пояснение к мере и число выпавших отчётов — там же, где в приложении.
+// Без них главный вопрос читателя «почему отчётов меньше, чем в базе»
+// остаётся без ответа.
+const MEASURE_HELP = {
+  gross_mb: ['Сколько данных читает отчёт: сумма размеров всех его таблиц. '
+    + 'Общая таблица считается у каждого отчёта, который её читает, — так и '
+    + 'надо для сравнения отчётов между собой, но сумма столбца больше '
+    + 'объёма базы и объёмом базы не является.',
+    'У отчёта нет ни одной таблицы с известным размером.'],
+  exclusive_mb: ['Сколько места освободится, если отчёт вывести из '
+    + 'эксплуатации: только его собственные таблицы, которых не касается ни '
+    + 'один другой отчёт.',
+    'Отчёт работает только на таблицах, которые нужны и другим отчётам, — '
+    + 'при его выводе не освободится ничего.'],
+  exec_count: ['Сколько раз отчёт запускали за период выгрузки.',
+    'По этим отчётам нет статистики обращений.'],
+  total_duration_sec: ['Обращения, умноженные на среднюю длительность '
+    + 'выборки: во сколько машинного времени обходится отчёт.',
+    'По этим отчётам нет статистики обращений.'],
+};
+
 function drawAbcSummary() {
   const rows = abcRows();
   const total = rows.reduce((s, r) => s + r.measure, 0);
+  const [help, why] = MEASURE_HELP[measureSelect.value];
+  document.getElementById('abc-help').textContent = help;
+  const scope = DATA.reports.filter(inScope).length;
+  const skipped = scope - rows.length;
+  const note = document.getElementById('abc-skipped');
+  note.hidden = !skipped;
+  if (skipped) {
+    note.innerHTML = `В анализ не вошли <b>${fmt(skipped)}</b> `
+      + `${reportsWord(skipped)} из ${fmt(scope)}: у них выбранная мера равна `
+      + `нулю или неизвестна. ${esc(why)}`;
+  }
   tiles('abc-summary', [['Всего отчётов', fmt(rows.length)]].concat(
     ['A', 'B', 'C'].map(g => {
       const grp = rows.filter(r => r.abc === g);
@@ -1230,11 +1296,11 @@ makeTable({name: 'abc', el: 't-abc', rowsFn: abcRows, cols: ABC_COLS,
   search: document.getElementById('q-abc'), count: 'c-abc'});
 makeTable({name: 'tables', el: 't-tables', rows: DATA.tables, cols: TABLE_COLS,
   search: document.getElementById('q-tables'), count: 'c-tables',
-  filter: document.getElementById('f-schema'), filterField: 'schema_name',
-  filterLabel: 'Все схемы',
+  filter: document.getElementById('f-kind'), filterField: 'kind_ru',
+  filterLabel: 'Все типы объектов',
   onRender: d => tiles('m-tables', [
     ['Объектов', fmt(d.length)],
-    ['Из них «сирот»', fmt(countOf(d, r => r.is_orphan))],
+    ['Не используются отчётами', fmt(countOf(d, r => r.is_orphan))],
     ['Суммарный объём, МБ', hasAny(d, 'total_mb') ? fmtInt(sumOf(d, 'total_mb')) : '—'],
     ['Доля БД, %', hasAny(d, 'percent_of_total')
       ? fmt(sumOf(d, 'percent_of_total'), 2) : '—'],

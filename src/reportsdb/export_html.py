@@ -140,15 +140,17 @@ QUERIES = {
           AND p.shared::DOUBLE / (c1.n + c2.n - p.shared) >= 0.3
         ORDER BY jaccard DESC, p.shared DESC
     """,
-    # Справочник таблиц — критичность и «сироты».
+    # Справочник объектов-источников: таблицы, view, процедуры — и кто из них
+    # не используется ни одним отчётом.
     "tables": """
-        SELECT full_name, schema_name, object_kind, report_count, is_orphan,
-               total_mb, percent_of_total, retention_days, row_count, plant_count
+        SELECT full_name, schema_name, object_kind, kind_source, report_count,
+               is_orphan, total_mb, percent_of_total, retention_days,
+               row_count, plant_count
         FROM v_table_criticality
         ORDER BY report_count DESC, total_mb DESC NULLS LAST
     """,
-    # Шапка по РЦ.
-    "rc": "SELECT * FROM v_rc_summary",
+    # Сравнение РЦ между собой: отчёты и объём базы завода рядом.
+    "rc": "SELECT * FROM v_network_overview",
 }
 
 # Показатели считаются в браузере из тех же наборов, что видит пользователь, —

@@ -209,18 +209,70 @@ WHERE exec_count IS NULL OR exec_count = 0
 ORDER BY exclusive_mb DESC, table_count DESC;
 
 -- 5.5. Обзор по организационным разрезам ---------------------------------
+-- Две независимые стороны РЦ, сведённые по ключу «сеть + завод»:
+--   отчёты  — из файла отчётов, размеры — из файла размеров.
+-- FULL JOIN, а не обычный: завод бывает в одном файле и отсутствует в другом
+-- (размеры выгрузили, отчёты ещё нет — и наоборот), и такой РЦ обязан остаться
+-- в сравнении со своими цифрами, а не исчезнуть.
 CREATE VIEW v_network_overview AS
+WITH by_reports AS (
+    SELECT
+        COALESCE(c.network, '(не указана)') AS network,
+        COALESCE(c.plant, '(не указан)')    AS plant,
+        COUNT(*)                            AS report_count,
+        COUNT(*) FILTER (WHERE c.uses_view) AS reports_with_view,
+        ROUND(SUM(c.exclusive_mb), 2)       AS exclusive_mb,
+        SUM(c.exec_count)                   AS exec_count,
+        ROUND(SUM(c.total_duration_sec), 1) AS total_duration_sec
+    FROM v_report_cost_value c
+    GROUP BY 1, 2
+),
+by_tables AS (
+    -- То же, что даёт v_tables_catalog, но собранное здесь: эта витрина
+    -- определена ниже по файлу, а порядок создания в DuckDB имеет значение.
+    SELECT
+        s.network, s.plant,
+        COUNT(DISTINCT t.full_name)                    AS db_table_count,
+        ROUND(SUM(s.total_mb), 1)                      AS db_total_mb,
+        COUNT(DISTINCT t.full_name) FILTER (WHERE u.report_count > 0)
+                                                       AS used_table_count,
+        ROUND(SUM(s.total_mb) FILTER (WHERE u.report_count > 0), 1) AS used_mb,
+        COUNT(DISTINCT LOWER(t.schema_name))           AS schema_count,
+        ROUND(MEDIAN(s.retention_days), 0)             AS median_retention_days
+    FROM fact_table_size s
+    JOIN dim_table t ON t.table_id = s.table_id
+    LEFT JOIN (
+        SELECT table_id, COUNT(DISTINCT report_id) AS report_count
+        FROM bridge_report_table GROUP BY 1
+    ) u ON u.table_id = s.table_id
+    GROUP BY 1, 2
+)
 SELECT
-    COALESCE(c.network, '(не указана)') AS network,
-    COALESCE(c.plant, '(не указан)')    AS plant,
-    COUNT(*)                            AS report_count,
-    COUNT(*) FILTER (WHERE c.uses_view) AS reports_with_view,
-    ROUND(SUM(c.exclusive_mb), 2)       AS exclusive_mb,
-    SUM(c.exec_count)                   AS exec_count,
-    ROUND(SUM(c.total_duration_sec), 1) AS total_duration_sec
-FROM v_report_cost_value c
-GROUP BY 1, 2
-ORDER BY report_count DESC;
+    COALESCE(r.network, t.network) AS network,
+    COALESCE(r.plant, t.plant)     AS plant,
+    COALESCE(r.report_count, 0)      AS report_count,
+    COALESCE(r.reports_with_view, 0) AS reports_with_view,
+    t.db_table_count,
+    t.db_total_mb,
+    t.used_table_count,
+    -- Таблицы, которых не касается ни один отчёт: место, которое база занимает
+    -- без видимой причины. Разница, а не отдельный счёт, — чтобы две колонки
+    -- гарантированно складывались в общее число таблиц завода.
+    t.db_table_count - t.used_table_count AS unused_table_count,
+    t.used_mb,
+    ROUND(t.db_total_mb - t.used_mb, 1)   AS unused_mb,
+    CASE WHEN t.db_total_mb > 0
+         THEN ROUND(100.0 * t.used_mb / t.db_total_mb, 1) END AS used_pct_of_plant,
+    t.schema_count,
+    t.median_retention_days,
+    r.exclusive_mb,
+    r.exec_count,
+    r.total_duration_sec,
+    CASE WHEN COALESCE(r.report_count, 0) > 0
+         THEN ROUND(t.db_total_mb / r.report_count, 1) END AS mb_per_report
+FROM by_reports r
+FULL JOIN by_tables t ON t.network = r.network AND t.plant = r.plant
+ORDER BY db_total_mb DESC NULLS LAST, report_count DESC;
 
 -- 5.5.1. Обзор каталога и схем --------------------------------------------
 CREATE VIEW v_catalog_overview AS
