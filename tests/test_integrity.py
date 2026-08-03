@@ -1133,6 +1133,67 @@ def test_exact_match_finds_only_the_listed_names():
     assert list(names[lowered.eq("trip_log") | bare.eq("trip_log")]) == ["sdd.trip_log"]
 
 
+# --- Выгрузка в Excel -----------------------------------------------------
+
+def test_workbook_has_every_sheet_with_russian_headers():
+    """Книгу открывают в Excel люди, а не программа.
+
+    Значит: листов столько, сколько попросили; шапка по-русски, потому что
+    `table_full_name` читателю ничего не говорит; шапка закреплена, иначе на
+    длинном списке непонятно, где какая колонка.
+    """
+    from io import BytesIO
+
+    import openpyxl
+    import pandas as pd
+
+    from _shared import build_workbook
+
+    pairs = pd.DataFrame({
+        "table_full_name": ["dbo.category", "dbo.category", "fin.invoice"],
+        "report_name": ["Отчёт A", "Отчёт Б", "Отчёт A"],
+        "total_mb": [10.0, 10.0, 5.0],
+        # Технический ключ обязан выпасть: в Excel он только мешает.
+        "table_id": [1, 1, 2],
+    })
+    by_report = pd.DataFrame({
+        "report_name": ["Отчёт A", "Отчёт Б"],
+        "table_count": [2, 1],
+        "table_names": ["dbo.category; fin.invoice", "dbo.category"],
+    })
+
+    book = openpyxl.load_workbook(BytesIO(build_workbook({
+        "Отчёты": by_report, "Таблицы и отчёты": pairs,
+    })))
+    assert book.sheetnames == ["Отчёты", "Таблицы и отчёты"]
+
+    head = [c.value for c in book["Отчёты"][1]]
+    assert head == ["Отчёт", "Таблиц", "Таблицы"]
+    assert book["Отчёты"].max_row == 3, "две строки данных плюс шапка"
+    assert book["Отчёты"].freeze_panes == "A2"
+
+    pair_head = [c.value for c in book["Таблицы и отчёты"][1]]
+    assert "table_id" not in pair_head, "суррогатный ключ в файл не идёт"
+    assert pair_head == ["Таблица", "Отчёт", "Объём, МБ"]
+
+
+def test_workbook_sheet_name_survives_excel_limits():
+    """Excel не принимает имя листа длиннее 31 знака и символы : \\ / ? * [ ]."""
+    from io import BytesIO
+
+    import openpyxl
+    import pandas as pd
+
+    from _shared import build_workbook
+
+    book = openpyxl.load_workbook(BytesIO(build_workbook({
+        "Отчёты: таблицы/размеры [весь список за период]": pd.DataFrame({"a": [1]}),
+    })))
+    name = book.sheetnames[0]
+    assert len(name) <= 31
+    assert not set(name) & set(':\\/?*[]')
+
+
 # --- Образ для передачи коллегам ------------------------------------------
 
 def test_dockerfile_copies_everything_the_app_needs():

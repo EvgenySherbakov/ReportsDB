@@ -497,6 +497,17 @@ every row and write the reports down by hand. Next to it is a CSV export button.
 One report appears in that list as many times as it uses your tables — these are
 relations, not a list of reports.
 
+The **"Export to Excel: two sheets"** button produces an `.xlsx` with two
+sheets:
+
+| Sheet | Row | Columns |
+| --- | --- | --- |
+| **Отчёты** (Reports) | a report | network, plant, catalog, how many of your tables it holds, the tables themselves separated by `;`, the total volume |
+| **Таблицы и отчёты** (Tables and reports) | a "table + report" pair | the same as on screen |
+
+The header row is frozen and column widths are fitted — the file opens ready to
+read. Numbers stay numbers, so formulas and sorting work immediately.
+
 ---
 
 ## Frequently asked questions

@@ -11,6 +11,7 @@ import streamlit as st
 
 from _shared import (
     download,
+    download_excel,
     num,
     page_setup,
     query,
@@ -167,7 +168,7 @@ with by_tables:
             f"по {num(len(found_t))} таблицам",
             expanded=True,
         ):
-            shown_links = show_table(
+            show_table(
                 linked,
                 {
                     "table_full_name": "Таблица",
@@ -178,11 +179,37 @@ with by_tables:
                 },
                 height=table_height(len(linked), 420),
             )
-            download(shown_links, "rc_2_tables_to_reports.csv",
-                     "Выгрузить: найденные таблицы и их отчёты")
+            # Свод по отчётам: строка — отчёт, его таблицы из запроса одной
+            # ячейкой. Именно с этим листом работают дальше — «сколько наших
+            # таблиц держит каждый отчёт и какие именно».
+            by_report = (
+                linked.groupby(
+                    ["report_name", "network", "plant", "catalog_path"],
+                    as_index=False, dropna=False,
+                )
+                .agg(
+                    table_count=("table_full_name", "nunique"),
+                    table_names=("table_full_name",
+                                 lambda c: "; ".join(sorted(set(c)))),
+                    total_mb=("total_mb", "sum"),
+                )
+                .sort_values(["table_count", "report_name"],
+                             ascending=[False, True])
+            )
+            download_excel(
+                {
+                    "Отчёты": by_report,
+                    "Таблицы и отчёты": linked,
+                },
+                "rc_2_tables_to_reports.xlsx",
+                "⬇️ Выгрузить в Excel: два листа",
+            )
             st.caption(
                 "Строка — пара «таблица + отчёт», поэтому один отчёт "
-                "встречается столько раз, сколько ваших таблиц он использует."
+                "встречается столько раз, сколько ваших таблиц он использует. "
+                "В файле Excel два листа: **«Отчёты»** — строка на отчёт, "
+                "сколько ваших таблиц он держит и какие именно (через `;`); "
+                "**«Таблицы и отчёты»** — те же пары, что в таблице выше."
             )
 
     picked_t = row_picker(

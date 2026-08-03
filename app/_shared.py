@@ -277,6 +277,7 @@ LABELS = {
     "percent_of_db": "Доля БД, %",
     "reports_with_view": "Из них через view",
     "table_count": "Таблиц",
+    "table_names": "Таблицы",
     "sized_table_count": "Из них с размером",
     "exclusive_table_count": "Эксклюзивных таблиц",
     "gross_rows": "Строк, всего",
@@ -692,6 +693,53 @@ def download(df: pd.DataFrame, filename: str, label: str = "Выгрузить C
         df.to_csv(index=False).encode("utf-8-sig"),
         file_name=filename,
         mime="text/csv",
+    )
+
+
+XLSX_MIME = ("application/vnd.openxmlformats-officedocument"
+             ".spreadsheetml.sheet")
+
+
+def build_workbook(sheets: dict[str, pd.DataFrame]) -> bytes:
+    """Книга Excel из нескольких листов. Ключ словаря — имя листа.
+
+    Колонки переименовываются в русские подписи из `LABELS`: файл открывают в
+    Excel люди, а не программа, и `table_full_name` в шапке им ничего не
+    говорит. Ширина колонок подгоняется по содержимому — иначе имена таблиц
+    приходится растягивать вручную в каждом листе.
+    """
+    from io import BytesIO
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for name, frame in sheets.items():
+            view = frame.drop(
+                columns=[c for c in TECHNICAL if c in frame.columns]
+            ).rename(columns=LABELS)
+            # Имя листа: Excel не принимает длиннее 31 знака и запрещает : \ / ? * [ ]
+            safe = re.sub(r"[:\\/?*\[\]]", " ", name)[:31]
+            view.to_excel(writer, sheet_name=safe, index=False)
+
+            worksheet = writer.sheets[safe]
+            for index, column in enumerate(view.columns, start=1):
+                longest = max(
+                    [len(str(column))]
+                    + [len(str(v)) for v in view[column].head(200)]
+                )
+                letter = worksheet.cell(row=1, column=index).column_letter
+                worksheet.column_dimensions[letter].width = min(longest + 2, 60)
+            worksheet.freeze_panes = "A2"
+    return buffer.getvalue()
+
+
+def download_excel(
+    sheets: dict[str, pd.DataFrame],
+    filename: str,
+    label: str = "Выгрузить в Excel",
+) -> None:
+    """Кнопка выгрузки книги Excel с несколькими листами."""
+    st.download_button(
+        label, build_workbook(sheets), file_name=filename, mime=XLSX_MIME,
     )
 
 
