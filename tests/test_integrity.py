@@ -1064,6 +1064,31 @@ def test_view_prefix_recognised_but_never_overrides_real_tables(tmp_path):
     )
 
 
+# --- Образ для передачи коллегам ------------------------------------------
+
+def test_dockerfile_copies_everything_the_app_needs():
+    """Всё, что приложение читает во время работы, обязано попасть в образ.
+
+    Забытый каталог не роняет сборку — он тихо меняет поведение у коллеги.
+    Так однажды потерялся `.streamlit/`: в контейнере пропадала тёмная тема,
+    `backgroundColor` переставал совпадать с `SURFACE` (кайма вокруг сегментов
+    диаграмм) и включалась обратно отправка статистики использования.
+    """
+    dockerfile = (ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
+    for folder in ("src/", "app/", "sql/", "config/", "data/", ".streamlit/"):
+        assert f"COPY {folder}" in dockerfile, f"Dockerfile не копирует {folder}"
+
+
+def test_dockerignore_keeps_the_data_folder():
+    """`data/` намеренно попадает в образ — коллеге хватает одной команды.
+
+    Если каталог однажды окажется в `.dockerignore`, образ соберётся молча, а
+    у коллеги приложение встретит его пустой базой.
+    """
+    ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
+    assert "data" not in ignored and "data/" not in ignored
+
+
 # --- Очистка базы ---------------------------------------------------------
 
 def test_clear_leaves_an_empty_but_working_database(paths, tmp_path):

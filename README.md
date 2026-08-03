@@ -121,6 +121,18 @@ docker compose -f docker/docker-compose.yml up --build
 Это сделано намеренно, чтобы коллеге хватило одной команды, но означает, что
 образ содержит рабочие данные: не публикуйте его в открытых реестрах.
 
+**Если у коллеги нет доступа к репозиторию**, передайте сам образ файлом:
+
+```bat
+docker compose -f docker\docker-compose.yml build
+docker save reportsdb:latest -o reportsdb-image.tar
+```
+
+Коллега: `docker load -i reportsdb-image.tar`, затем
+`docker run -d -p 8501:8501 --name reportsdb reportsdb:latest`. Файл выходит
+около 1 ГБ; пошагово, вместе с обновлением и подключением своей папки, —
+в [RUNBOOK](docs/RUNBOOK.md#передать-образ-коллеге).
+
 **Через HTML** — им не нужно ничего:
 
 ```bash

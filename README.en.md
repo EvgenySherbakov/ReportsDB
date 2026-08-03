@@ -125,6 +125,19 @@ the source files. This is deliberate, so that one command is enough for a
 colleague, but it means the image contains working data: do not publish it to
 public registries.
 
+**If the colleague has no access to the repository**, hand over the image as a
+file:
+
+```bat
+docker compose -f docker\docker-compose.yml build
+docker save reportsdb:latest -o reportsdb-image.tar
+```
+
+The colleague runs `docker load -i reportsdb-image.tar`, then
+`docker run -d -p 8501:8501 --name reportsdb reportsdb:latest`. The file comes
+out around 1 GB; step by step, together with updating and mounting their own
+folder, — in the [RUNBOOK](docs/RUNBOOK.en.md#handing-the-image-to-a-colleague).
+
 **Via HTML** — they need nothing at all:
 
 ```bash

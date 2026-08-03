@@ -82,6 +82,88 @@ docker compose -f docker/docker-compose.yml up
 
 Without `--build` — the image is already built.
 
+### Handing the image to a colleague
+
+A colleague needs neither the repository nor your Excel files: **the built
+database is inside the image**. All they need is Docker.
+
+**Step 1. Build the database on your machine** and check the numbers — the image
+will carry exactly what you see in the app right now.
+
+**Step 2. Build the image:**
+
+```bat
+docker compose -f docker\docker-compose.yml build
+```
+
+**Step 3. Save the image to a file:**
+
+```bat
+docker save reportsdb:latest -o reportsdb-image.tar
+```
+
+The file will be large — around 1 GB (Python and the libraries are inside).
+Compress it if you are sending it by email or through a file service:
+
+```bat
+docker save reportsdb:latest | gzip > reportsdb-image.tar.gz
+```
+
+PowerShell has no `gzip` in a pipeline — save the `.tar` and compress it with an
+archiver, which gives roughly a third of the size.
+
+**Step 4. Transfer the file** — a network share, a USB stick, the company file
+service.
+
+> ⚠️ **The image contains working data.** Both the built database and the source
+> Excel files from `data/` are in there. Treat the image as carefully as the
+> export itself, and **do not publish it to Docker Hub or other public
+> registries.**
+
+**Step 5. The colleague loads the image and runs it:**
+
+```bat
+docker load -i reportsdb-image.tar
+docker run -d -p 8501:8501 --name reportsdb reportsdb:latest
+```
+
+For the compressed file: `docker load -i reportsdb-image.tar.gz` — `docker load`
+recognises gzip on its own.
+
+Then open <http://localhost:8501>. To stop — `docker stop reportsdb`, to start
+again — `docker start reportsdb`, to remove — `docker rm -f reportsdb`.
+
+### What the colleague can and cannot do
+
+**Can:** view all the analytics, filter, export CSV, run ad-hoc SQL, build
+themselves an HTML file.
+
+**Cannot (without extra steps):** keep their own data. If they load files
+through the interface, those go inside the container and disappear on
+`docker rm`. For data to live on their disk, they should mount a folder:
+
+```bat
+docker run -d -p 8501:8501 -v C:\reportsdb-data:/app/data --name reportsdb reportsdb:latest
+```
+
+But then the mounted folder **completely replaces** the data from the image: if
+it is empty, the app greets them with an empty database. This is only for people
+who will load their own files; a reader is fine with the command without `-v`.
+
+### How to update the colleague's copy
+
+The image is a snapshot of the data at build time. To update it, build again and
+repeat steps 2–5; before `docker load` the colleague removes the old container:
+
+```bat
+docker rm -f reportsdb
+```
+
+If the colleague has access to the repository and to Docker, there is an easier
+way: they run `git clone`, you send only the data files, and they build the
+image themselves with the command from step 4 of option A. Then there is no need
+to ship a gigabyte every time.
+
 ---
 
 ## Option B — Python

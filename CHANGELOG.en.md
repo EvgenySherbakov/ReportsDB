@@ -20,6 +20,13 @@ file records only what a user can see.
   keeps it), and source files in `data/raw/` are left alone. The same thing as
   the `scripts\rdb.bat clear` command.
 
+- `.streamlit/config.toml` was added to the Docker image: inside the container
+  the dark theme was lost, a rim appeared around chart segments, and Streamlit
+  usage statistics were switched back on.
+- The RUNBOOK now describes handing the image to a colleague who has no access
+  to the repository: building, `docker save`, transferring the file,
+  `docker load`, running and updating.
+
 ### Fixed
 
 - The Overview crashed on a completely empty database: after clearing there is
