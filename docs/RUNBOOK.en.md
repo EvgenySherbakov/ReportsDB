@@ -452,6 +452,32 @@ scripts\rdb.bat clear
 
 ---
 
+## Searching for several tables at once
+
+The search field on any page accepts **several values at once**. Three
+equivalent ways:
+
+- comma-separated: `dbo.orders, fin.invoice, sales.audit`;
+- semicolon-separated: `dbo.orders;fin.invoice`;
+- **as a column from Excel** — select the column of table names, copy it and
+  paste it into the field as is.
+
+A row enters the result if it matches **at least one** value. This is parsing a
+list — "show me these tables"; searching for an intersection ("both at once")
+makes no sense, since for different tables it is always empty.
+
+Below the table you can see how many values the query holds and **which of them
+found nothing** — when pasting a list that is the main thing: it is immediately
+clear what is missing from the database.
+
+A space is **not** a separator: report names consist of several words, and
+«Продажи за месяц» would otherwise fall apart into three fragments.
+
+The search matches part of a name, not the whole one: `invoice` finds both
+`fin.invoice` and `sales.invoice_stg`.
+
+---
+
 ## Frequently asked questions
 
 **"The database was built by an earlier version of the program."** Appears after

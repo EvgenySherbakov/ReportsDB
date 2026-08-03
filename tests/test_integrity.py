@@ -13,6 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "app"))
 
 from reportsdb.config import (  # noqa: E402
     Mapping,
@@ -1062,6 +1063,46 @@ def test_view_prefix_recognised_but_never_overrides_real_tables(tmp_path):
     assert kinds["dbo.v_stored"].startswith("TABLE"), (
         "объект с сегментами в файле размеров обязан остаться таблицей"
     )
+
+
+# --- Поиск ----------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("dbo.orders", ["dbo.orders"]),
+        ("dbo.orders, dbo.customers", ["dbo.orders", "dbo.customers"]),
+        ("dbo.orders;dbo.customers", ["dbo.orders", "dbo.customers"]),
+        ("dbo.orders\ndbo.customers", ["dbo.orders", "dbo.customers"]),
+        ("  dbo.orders ,, ; dbo.customers  ", ["dbo.orders", "dbo.customers"]),
+        # Пробел не разделитель: имя отчёта состоит из нескольких слов.
+        ("Продажи за месяц", ["Продажи за месяц"]),
+        ("", []),
+        ("  , ; ", []),
+    ],
+)
+def test_search_terms_splits_a_list_but_keeps_multiword_names(text, expected):
+    from _shared import search_terms
+
+    assert search_terms(text) == expected
+
+
+def test_search_is_substring_not_regex():
+    """Заказчик вставляет настоящие имена, а не регулярные выражения.
+
+    `[dbo].[Orders]` как регулярка — это класс символов, он нашёл бы строки с
+    буквами d, b, o; одинокая `*` уронила бы страницу «nothing to repeat».
+    """
+    import pandas as pd
+
+    from _shared import search_terms
+
+    assert search_terms("[dbo].[Orders]") == ["[dbo].[Orders]"]
+
+    frame = pd.DataFrame({"full_name": ["[dbo].[Orders]", "fin.invoice"]})
+    hit = frame["full_name"].str.contains("[dbo].[Orders]", case=False,
+                                          na=False, regex=False)
+    assert list(hit) == [True, False]
 
 
 # --- Образ для передачи коллегам ------------------------------------------

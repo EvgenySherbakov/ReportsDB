@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -388,6 +389,18 @@ def rc_scope(df: pd.DataFrame, network: str | None, plant: str | None) -> pd.Dat
               & (df["plant"].fillna("(не указан)") == plant)]
 
 
+def search_terms(text: str) -> list[str]:
+    """Строка поиска → список искомых значений.
+
+    Разделители — запятая, точка с запятой и перенос строки. **Пробел
+    разделителем не служит**: имена отчётов состоят из нескольких слов, и по
+    пробелу «Продажи за месяц» распалось бы на три бесполезных обрывка.
+    Имена таблиц пробелов не содержат, поэтому список таблиц удобно вставлять
+    как есть — хоть через запятую, хоть колонкой из Excel.
+    """
+    return [part.strip() for part in re.split(r"[,;\n]+", text) if part.strip()]
+
+
 def search_box(
     df: pd.DataFrame,
     columns: list[str],
@@ -398,19 +411,61 @@ def search_box(
 
     Заказчик просил, чтобы во всех таблицах можно было найти строку и по имени
     таблицы, и по имени отчёта — поэтому поле одно, а колонок несколько.
+
+    **Значений в строке может быть несколько**, через запятую или с новой
+    строки: строка остаётся, если подходит хотя бы под одно из них. Это разбор
+    списка таблиц «покажи вот эти двадцать», а не пересечение условий —
+    пересечение по разным таблицам дало бы пустой результат всегда.
+
+    Поиск идёт подстрокой, а не регулярным выражением: заказчик вставляет
+    настоящие имена, и `[dbo].[Orders]` при разборе как регулярка нашла бы
+    совсем не то, а одинокая `*` уронила бы страницу.
     """
     present = [c for c in columns if c in df.columns]
     if not present:
         return df
-    text = st.text_input(label, "", key=key,
-                         placeholder="часть имени таблицы или отчёта…")
-    if not text:
+    # text_area, а не text_input: в однострочное поле список из Excel не
+    # вставить — браузер по стандарту вырезает переводы строк, и колонка из
+    # двадцати таблиц слипается в одно бессмысленное слово. Высота
+    # минимальная, чтобы поле не съедало экран у страниц, где под таблицей
+    # должен помещаться разбор выбранной строки.
+    text = st.text_area(
+        label, "", key=key, height=68,
+        placeholder="часть имени; несколько — через запятую или списком из Excel",
+        help="Можно указать несколько значений: через запятую, точку с запятой "
+             "или каждое с новой строки — например, вставить столбец из Excel. "
+             "Строка попадёт в результат, если подходит хотя бы под одно из "
+             "них. Пробел разделителем не считается: имена отчётов состоят из "
+             "нескольких слов.",
+    )
+    terms = search_terms(text)
+    if not terms:
         return df
+
     mask = False
-    for column in present:
-        mask = mask | df[column].astype(str).str.contains(text, case=False, na=False)
+    matched = set()
+    for term in terms:
+        hit = False
+        for column in present:
+            column_hit = df[column].astype(str).str.contains(
+                term, case=False, na=False, regex=False)
+            mask = mask | column_hit
+            hit = hit or bool(column_hit.any())
+        if hit:
+            matched.add(term)
+
     found = df[mask]
-    st.caption(f"Найдено строк: {len(found)} из {len(df)}.")
+    caption = f"Найдено строк: {len(found)} из {len(df)}."
+    if len(terms) > 1:
+        caption += f" Значений в запросе: {len(terms)}."
+        missing = [t for t in terms if t not in matched]
+        if missing:
+            # Какие именно имена не нашлись — самое ценное при вставке списка:
+            # иначе непонятно, то ли их нет в базе, то ли опечатка в запросе.
+            shown = ", ".join(f"`{t}`" for t in missing[:10])
+            tail = f" и ещё {len(missing) - 10}" if len(missing) > 10 else ""
+            caption += f" Ничего не найдено по: {shown}{tail}."
+    st.caption(caption)
     return found
 
 

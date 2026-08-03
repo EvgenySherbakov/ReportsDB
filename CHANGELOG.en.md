@@ -20,6 +20,12 @@ file records only what a user can see.
   keeps it), and source files in `data/raw/` are left alone. The same thing as
   the `scripts\rdb.bat clear` command.
 
+- **Searching by several values at once** in every table: separated by a comma,
+  a semicolon or pasted as a list from Excel — a row enters the result if it
+  matches at least one. Below the table it says how many values the query holds
+  and which of them found nothing. The field became multi-line: a column from
+  Excel could not be pasted into a single-line one — the browser merged the
+  lines into a single word.
 - `.streamlit/config.toml` was added to the Docker image: inside the container
   the dark theme was lost, a rim appeared around chart segments, and Streamlit
   usage statistics were switched back on.
@@ -34,6 +40,8 @@ file records only what a user can see.
   ended in an error.
 - On an empty database the missing-data warning said "table sizes not loaded"
   instead of stating that the database is empty and offering to load files.
+- The search parsed the query as a regular expression: `[dbo].[Orders]` found
+  the wrong rows, and a lone `*` crashed the page with an error.
 
 ## [1.0.0] — 2026-08-02
 

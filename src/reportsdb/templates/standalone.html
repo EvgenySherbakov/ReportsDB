@@ -220,7 +220,7 @@
   неё не ссылается ни один отчёт.</p>
   <div class="metrics" id="m-sizes"></div>
   <div class="controls">
-    <input type="search" id="q-sizes" placeholder="Поиск по имени таблицы…">
+    <input type="search" id="q-sizes" placeholder="Поиск: имя или несколько через запятую…">
     <select id="f-sizes"></select>
     <span class="count" id="c-sizes"></span>
     <button class="csv" data-csv="sizes">Выгрузить CSV</button>
@@ -244,7 +244,7 @@
     <p class="hint">Строка — отчёт. Щёлкните по ней: ниже появится разбор его
     таблиц-источников. Повторный щелчок снимает выбор.</p>
     <div class="controls">
-      <input type="search" id="q-rc2rep" placeholder="Поиск по наименованию отчёта…">
+      <input type="search" id="q-rc2rep" placeholder="Поиск: имя отчёта; несколько через запятую…">
       <span class="count" id="c-rc2rep"></span>
       <button class="csv" data-csv="rc2rep">Выгрузить CSV</button>
     </div>
@@ -258,7 +258,7 @@
     <p class="hint">Строка — таблица. Щёлкните по ней, чтобы увидеть, в какие
     отчёты она попадает.</p>
     <div class="controls">
-      <input type="search" id="q-rc2tab" placeholder="Поиск по наименованию таблицы…">
+      <input type="search" id="q-rc2tab" placeholder="Поиск: имя таблицы; несколько через запятую…">
       <span class="count" id="c-rc2tab"></span>
       <button class="csv" data-csv="rc2tab">Выгрузить CSV</button>
     </div>
@@ -273,7 +273,7 @@
 
   <div data-sub="rc2all" hidden>
     <div class="controls">
-      <input type="search" id="q-rc2" placeholder="Поиск по отчёту или таблице…">
+      <input type="search" id="q-rc2" placeholder="Поиск: отчёт или таблица; несколько через запятую…">
       <span class="count" id="c-rc2"></span>
       <button class="csv" data-csv="rc2">Выгрузить CSV</button>
     </div>
@@ -330,7 +330,7 @@
   функции, прочие объекты и отчёты-соседи по тем же таблицам. Повторный щелчок
   снимает выбор.</p>
   <div class="controls">
-    <input type="search" id="q-card" placeholder="Поиск по имени или пути…">
+    <input type="search" id="q-card" placeholder="Поиск: имя или путь; несколько через запятую…">
     <span class="count" id="c-card"></span>
   </div>
   <div class="scroll" style="max-height:330px;overflow-y:auto">
@@ -345,7 +345,7 @@
   время — число обращений, умноженное на среднюю длительность выборки.</p>
   <div class="metrics" id="m-reports"></div>
   <div class="controls">
-    <input type="search" id="q-reports" placeholder="Поиск по имени или пути…">
+    <input type="search" id="q-reports" placeholder="Поиск: имя или путь; несколько через запятую…">
     <select id="f-folder"></select>
     <span class="count" id="c-reports"></span>
     <button class="csv" data-csv="reports">Выгрузить CSV</button>
@@ -426,7 +426,7 @@
   не применяется — объект общий для всех заводов.</p>
   <div class="metrics" id="m-tables"></div>
   <div class="controls">
-    <input type="search" id="q-tables" placeholder="Поиск по имени объекта…">
+    <input type="search" id="q-tables" placeholder="Поиск: имя объекта; несколько через запятую…">
     <select id="f-kind"></select>
     <span class="count" id="c-tables"></span>
     <button class="csv" data-csv="tables">Выгрузить CSV</button>
@@ -486,6 +486,10 @@ function plural(n, one, few, many) {
   return many;
 }
 const reportsWord = n => plural(n, 'отчёт', 'отчёта', 'отчётов');
+
+// Строка поиска → список искомых значений, уже в нижнем регистре.
+const searchTerms = text => text.toLowerCase().split(/[,;\n]+/)
+  .map(t => t.trim()).filter(Boolean);
 for (const t of DATA.tables) t.kind_ru = kindRu(t.object_kind);
 
 const REPORT_BY_ID = new Map(DATA.reports.map(r => [r.report_id, r]));
@@ -667,13 +671,21 @@ function makeTable(opts) {
 
   function current() {
     const source = rowsFn ? rowsFn() : rows;
-    const q = (search?.value || '').toLowerCase().trim();
+    // Значений в строке поиска может быть несколько — через запятую, точку с
+    // запятой или с новой строки. Строка остаётся, если подходит хотя бы под
+    // одно: это разбор списка «покажи вот эти таблицы», а не пересечение
+    // условий, которое по разным таблицам всегда дало бы пусто. Пробел
+    // разделителем не служит — имена отчётов состоят из нескольких слов.
+    const terms = searchTerms(search?.value || '');
     const f = filter?.value || '';
     const out = source.filter(r => {
       if (!inScope(r)) return false;
       if (f && String(r[filterField]) !== f) return false;
-      if (!q) return true;
-      return cols.some(c => String(r[c.key] ?? '').toLowerCase().includes(q));
+      if (!terms.length) return true;
+      return cols.some(c => {
+        const v = String(r[c.key] ?? '').toLowerCase();
+        return terms.some(t => v.includes(t));
+      });
     });
     return out.sort((a, b) => {
       const x = a[sortKey], y = b[sortKey];
