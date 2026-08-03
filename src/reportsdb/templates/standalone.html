@@ -71,6 +71,8 @@
   .scopebar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
               margin-left: auto; }
   .scopebar label { color: var(--text-secondary); font-size: .85rem; }
+  .scopebar label.exact { display: inline-flex; align-items: center; gap: .35rem;
+                          cursor: pointer; user-select: none; }
 
   /* Вкладки повторяют разделы меню приложения. */
   nav.tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: 1.1rem;
@@ -184,6 +186,9 @@
   <span class="scopebar">
     <label for="f-rc">Распределительный центр</label>
     <select id="f-rc"></select>
+    <label class="exact" title="Искать имена целиком, а не как часть. Включайте, когда вставили список готовых имён: иначе «itm.log» найдёт заодно «dbo.catalog» и «wh1.errlog». Имя без схемы тоже считается совпадением.">
+      <input type="checkbox" id="f-exact"> Точное совпадение
+    </label>
     <button id="theme" type="button">Тема</button>
   </span>
 </header>
@@ -490,6 +495,16 @@ const reportsWord = n => plural(n, 'отчёт', 'отчёта', 'отчётов
 // Строка поиска → список искомых значений, уже в нижнем регистре.
 const searchTerms = text => text.toLowerCase().split(/[,;\n]+/)
   .map(t => t.trim()).filter(Boolean);
+
+// Два режима сравнения, как в приложении. По части имени ищут, когда помнят
+// фрагмент; для списка готовых имён этого мало — «itm.log» принесёт заодно
+// «dbo.catalog». В точном режиме имя без схемы тоже считается совпадением:
+// в выгрузках половина имён приходит со схемой, половина без.
+function matchesTerm(value, term, exact) {
+  if (!exact) return value.includes(term);
+  if (value === term) return true;
+  return !term.includes('.') && value.slice(value.lastIndexOf('.') + 1) === term;
+}
 for (const t of DATA.tables) t.kind_ru = kindRu(t.object_kind);
 
 const REPORT_BY_ID = new Map(DATA.reports.map(r => [r.report_id, r]));
@@ -581,6 +596,7 @@ function rc2ByTables() {
 // Один выбор на весь файл, как выбор РЦ в приложении. Строки без сети и завода
 // (справочник таблиц) фильтр не трогает: таблица общая для всех заводов.
 const rcSelect = document.getElementById('f-rc');
+const exactBox = document.getElementById('f-exact');
 const rcPairs = [...new Set(DATA.reports.map(r => `${r.network} · ${r.plant}`))].sort();
 rcSelect.innerHTML = '<option value="">Все ТС и заводы</option>'
   + rcPairs.map(v => `<option>${esc(v)}</option>`).join('');
@@ -682,9 +698,10 @@ function makeTable(opts) {
       if (!inScope(r)) return false;
       if (f && String(r[filterField]) !== f) return false;
       if (!terms.length) return true;
+      const exact = exactBox.checked;
       return cols.some(c => {
         const v = String(r[c.key] ?? '').toLowerCase();
-        return terms.some(t => v.includes(t));
+        return terms.some(t => matchesTerm(v, t, exact));
       });
     });
     return out.sort((a, b) => {
@@ -1337,6 +1354,7 @@ measureSelect.onchange = redrawAll;
 // Выбранную строку не сбрасываем: если отчёт остался в разрезе, разбор о нём
 // по-прежнему верен, а если уехал — makeTable снимет выбор сам.
 rcSelect.onchange = redrawAll;
+exactBox.onchange = redrawAll;
 
 /* --- Вложенные виды ----------------------------------------------------- */
 document.querySelectorAll('nav.subtabs').forEach(nav => {

@@ -1105,6 +1105,34 @@ def test_search_is_substring_not_regex():
     assert list(hit) == [True, False]
 
 
+def test_exact_match_finds_only_the_listed_names():
+    """Список готовых имён не должен приносить соседей по подстроке.
+
+    Ровно та жалоба заказчика: он вставил список таблиц, а в выборку попали
+    `dbo.catalog` и `wh1.errlog` — просто потому, что «log» есть и в них.
+    """
+    import pandas as pd
+
+    names = pd.Series([
+        "itm.log", "dbo.catalog", "wh1.errlog", "wh1.transmitlog",
+        "sdd.trip_log", "fin.invoice",
+    ])
+
+    # Как ищет режим «часть имени»: соседи приезжают вместе с нужной строкой.
+    loose = names[names.str.contains("itm.log", case=False, regex=False)]
+    assert list(loose) == ["itm.log"]
+    loose_log = names[names.str.contains("log", case=False, regex=False)]
+    assert len(loose_log) == 5, "по части имени «log» находится половина базы"
+
+    # Как ищет режим «точное совпадение».
+    lowered = names.str.lower()
+    assert list(names[lowered.eq("itm.log")]) == ["itm.log"]
+
+    # Имя без схемы тоже совпадение: в выгрузке половина имён без неё.
+    bare = lowered.str.rsplit(".", n=1).str[-1]
+    assert list(names[lowered.eq("trip_log") | bare.eq("trip_log")]) == ["sdd.trip_log"]
+
+
 # --- Образ для передачи коллегам ------------------------------------------
 
 def test_dockerfile_copies_everything_the_app_needs():

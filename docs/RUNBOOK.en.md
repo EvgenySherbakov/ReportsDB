@@ -473,8 +473,29 @@ clear what is missing from the database.
 A space is **not** a separator: report names consist of several words, and
 «Продажи за месяц» would otherwise fall apart into three fragments.
 
-The search matches part of a name, not the whole one: `invoice` finds both
-`fin.invoice` and `sales.invoice_stg`.
+### Part of a name or an exact match
+
+By default the search matches **part of a name**: `invoice` finds both
+`fin.invoice` and `sales.invoice_stg`. That is convenient when you remember a
+fragment.
+
+For a list of ready names it is not enough: `itm.log` also drags in
+`dbo.catalog` and `wh1.errlog` — they contain "log" too. Tick **"Exact match"**
+under the search field: names are then compared in full.
+
+A name **without a schema also counts as a match**: `TRIP_LOG` finds
+`sdd.trip_log`. This is needed because in exports half the names arrive with a
+schema and half without, and you should not have to split the list by hand.
+
+### All reports for a list of tables at once
+
+On page **№2 → the "By tables" tab**, as soon as the search selects something, a
+block **"All reports for the found tables"** expands above the list. It holds
+"table + report" rows for **all** the found tables at once — no need to click
+every row and write the reports down by hand. Next to it is a CSV export button.
+
+One report appears in that list as many times as it uses your tables — these are
+relations, not a list of reports.
 
 ---
 

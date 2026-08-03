@@ -16,9 +16,11 @@ from _shared import (
     query,
     rc_scope,
     rc_selector,
+    reports_word,
     row_picker,
     search_box,
     show_table,
+    table_height,
 )
 
 page_setup("№2. Отчёт → таблицы", "2️⃣")
@@ -144,6 +146,45 @@ with by_tables:
                          "Строка — таблица. Поиск по наименованию таблицы",
                          key="s_rc2_tab")
 
+    # Отчёты по всему найденному списку сразу. Разбор по щелчку отвечает на
+    # вопрос про одну таблицу, а приходят со списком: «вот двадцать таблиц,
+    # покажи, какие отчёты их держат». Перебирать двадцать строк по одной,
+    # выписывая отчёты в блокнот, — не работа.
+    if len(found_t) < len(tables):
+        names = set(found_t["table_full_name"])
+        linked = (
+            df[df["table_full_name"].isin(names)][
+                ["table_full_name", "report_name", "network", "plant",
+                 "catalog_path", "total_mb"]
+            ]
+            .drop_duplicates()
+            .sort_values(["table_full_name", "report_name"])
+        )
+        with st.expander(
+            f"📋 Все отчёты по найденным таблицам: "
+            f"{num(linked['report_name'].nunique())} "
+            f"{reports_word(linked['report_name'].nunique())} "
+            f"по {num(len(found_t))} таблицам",
+            expanded=True,
+        ):
+            shown_links = show_table(
+                linked,
+                {
+                    "table_full_name": "Таблица",
+                    "report_name": "Отчёт",
+                    "catalog_path": "Каталог",
+                    "total_mb": st.column_config.NumberColumn(
+                        "Объём таблицы, МБ", format="%.1f"),
+                },
+                height=table_height(len(linked), 420),
+            )
+            download(shown_links, "rc_2_tables_to_reports.csv",
+                     "Выгрузить: найденные таблицы и их отчёты")
+            st.caption(
+                "Строка — пара «таблица + отчёт», поэтому один отчёт "
+                "встречается столько раз, сколько ваших таблиц он использует."
+            )
+
     picked_t = row_picker(
         found_t, "table_full_name", "rc2tab",
         [
@@ -154,7 +195,7 @@ with by_tables:
         ],
     )
     if picked_t is None:
-        st.info("👆 Щёлкните по строке таблицы — ниже появится разбор.")
+        st.info("👆 Щёлкните по строке таблицы — ниже появится разбор одной.")
     else:
         st.divider()
         rows = df[df["table_full_name"] == picked_t["table_full_name"]]

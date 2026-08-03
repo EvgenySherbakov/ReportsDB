@@ -26,6 +26,14 @@ file records only what a user can see.
   and which of them found nothing. The field became multi-line: a column from
   Excel could not be pasted into a single-line one — the browser merged the
   lines into a single word.
+- **An "Exact match" checkbox** for the search: names are compared in full
+  rather than as a part. For a list of ready names this is essential —
+  otherwise `itm.log` drags in `dbo.catalog` and `wh1.errlog`. A name without a
+  schema also counts as a match, so `TRIP_LOG` finds `sdd.trip_log`. Present in
+  the colleague export too, as a toggle in the header.
+- **All reports for the found tables at once** on №2 → "By tables": a block with
+  "table + report" relations for the whole found list, plus CSV export.
+  Previously reports could only be seen one table per click.
 - `.streamlit/config.toml` was added to the Docker image: inside the container
   the dark theme was lost, a rim appeared around chart segments, and Streamlit
   usage statistics were switched back on.

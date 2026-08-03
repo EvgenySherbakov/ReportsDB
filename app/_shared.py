@@ -417,7 +417,14 @@ def search_box(
     списка таблиц «покажи вот эти двадцать», а не пересечение условий —
     пересечение по разным таблицам дало бы пустой результат всегда.
 
-    Поиск идёт подстрокой, а не регулярным выражением: заказчик вставляет
+    **Два режима сравнения.** По умолчанию — часть имени: так ищут, когда
+    помнят фрагмент. Для списка готовых имён этого мало: `itm.log` найдёт и
+    `dbo.catalog`, и `wh1.errlog`, потому что «log» в них есть. Флажок
+    «Точное совпадение» переводит поиск на равенство целиком; имя без схемы
+    тоже считается совпадением, чтобы `TRIP_LOG` находил `sdd.trip_log` —
+    в выгрузках половина имён приходит со схемой, половина без.
+
+    Поиск подстрокой идёт без регулярных выражений: заказчик вставляет
     настоящие имена, и `[dbo].[Orders]` при разборе как регулярка нашла бы
     совсем не то, а одинокая `*` уронила бы страницу.
     """
@@ -439,6 +446,12 @@ def search_box(
              "нескольких слов.",
     )
     terms = search_terms(text)
+    exact = st.checkbox(
+        "Точное совпадение", key=f"{key}_exact" if key else None,
+        help="Искать имена целиком, а не как часть. Включайте, когда вставили "
+             "список готовых имён: иначе «itm.log» найдёт заодно «dbo.catalog» "
+             "и «wh1.errlog». Имя без схемы тоже считается совпадением.",
+    )
     if not terms:
         return df
 
@@ -447,8 +460,18 @@ def search_box(
     for term in terms:
         hit = False
         for column in present:
-            column_hit = df[column].astype(str).str.contains(
-                term, case=False, na=False, regex=False)
+            values = df[column].astype(str)
+            if exact:
+                lowered = values.str.lower()
+                column_hit = lowered.eq(term.lower())
+                # Имя без схемы: в выгрузке половина имён приходит как
+                # «схема.таблица», половина — голым именем.
+                if "." not in term:
+                    column_hit = column_hit | lowered.str.rsplit(
+                        ".", n=1).str[-1].eq(term.lower())
+            else:
+                column_hit = values.str.contains(
+                    term, case=False, na=False, regex=False)
             mask = mask | column_hit
             hit = hit or bool(column_hit.any())
         if hit:
@@ -466,6 +489,17 @@ def search_box(
             tail = f" и ещё {len(missing) - 10}" if len(missing) > 10 else ""
             caption += f" Ничего не найдено по: {shown}{tail}."
     st.caption(caption)
+
+    # Подсказка вместо догадок: список готовых имён почти всегда ищут целиком,
+    # а поиск по части молча приносит соседей — заказчик замечает это уже на
+    # результатах и не знает, что делать.
+    if len(terms) > 1 and not exact:
+        st.info(
+            "Ищется **часть имени**, поэтому в выборку попадают и другие "
+            "строки: `itm.log` находит заодно `dbo.catalog` и `wh1.errlog`. "
+            "Вставили список готовых имён — включите **Точное совпадение**.",
+            icon="🔎",
+        )
     return found
 
 
