@@ -575,6 +575,20 @@ Pages:
    overwritten. After the rebuild the caches are cleared, otherwise the
    analytics pages keep showing the old data.
 
+   **Clearing the database** — a collapsed block right under the current
+   state, above every `st.stop()` on the page: lower down the button simply
+   would not render when the folder is empty or no reports file is selected.
+   It erases all data and leaves an **empty database of the right
+   structure** rather than deleting the file: the analytics pages still open
+   and show zeros instead of a "database not found" error, and the structure
+   version stays current. The `.bak` backup is deleted along with the
+   database — clearing is asked for when working data should not remain on
+   the machine, and a backup next to it would keep exactly what was meant to
+   be erased; a checkbox preserves it when needed. Source files in
+   `data/raw/` are left alone, and the page states plainly how many of them
+   remain. Protection against a misclick: the block is collapsed and a
+   confirmation checkbox is required.
+
 1. **Overview** — the main dashboard, everything scoped to the selected DC, the
    selector in the header, the chosen "network + plant" pair shown in the
    subtitle. Top to bottom:
@@ -892,3 +906,4 @@ versions in the same commit.
 | 2026-08-02 | **Plant comparison instead of a plain summary.** `v_network_overview` is assembled from two independent sides — reports from the reports file, sizes from the sizes file — through a `FULL JOIN`: a plant can exist in one file and be absent from the other, and such a DC must stay in the comparison rather than disappear. Added: the plant's database volume, the number of tables, how many of them are under reports and how many are not (in units and in MB), the share of volume under reports, the number of schemas, the median retention depth and "MB per report". The "Networks and plants" page was rebuilt: tiles, a "under reports / not under reports" stack per plant (two quantities of the same nature and the same scale — honest bars, not two axes) and a comparison table. The "(не указана)/(не указан)" placeholder rows were excluded from the network and plant counters: that is not a network and not a plant, it is an unfilled column. `SCHEMA_VERSION` was raised to 10. |
 | 2026-08-02 | **The documentation became bilingual.** README, RUNBOOK, ARCHITECTURE and this specification exist in Russian and English side by side: the Russian file is the original, the English one lives next to it with an `.en` suffix, and a language switcher is the first line of each. Separate files rather than two languages inside one: a document duplicated section by section is unreadable in both languages at once. `CLAUDE.md` stayed Russian-only — it is the agent's brief, not user documentation. A test checks that every Russian document has an English counterpart with the same heading structure: without it the two versions drift apart in a couple of commits and the English one quietly turns into a lie. |
 | 2026-08-02 | **Version 1.0.0 was released.** The version lives in two places — `pyproject.toml` and `config.VERSION` — and they must match: `VERSION` is written into `etl_run.tool_version`, so any database shows which code built it, and diverging versions turn that record into a lie. Checked by `test_version_is_the_same_everywhere`. A changelog was started, `CHANGELOG.md` / `CHANGELOG.en.md`, in the Keep a Changelog format: what a user can notice goes there, while the details and rationale stay here in the journal. Not to be confused with `SCHEMA_VERSION`: that one governs the database structure and is raised on every SQL edit, independently of the program version. The state is marked with the `v1.0.0` tag; further work accumulates in the "Unreleased" section. |
+| 2026-08-02 | **A clear-the-database button** on the load page. It erases all data and leaves an empty database of the right structure rather than deleting the file: otherwise every page would greet the user with a "database not found" error instead of honest zeros, and the structure version would reset to zero and add a second confusing warning. The `.bak` backup is deleted along with the database: clearing is asked for when working data should not remain on the machine, and a backup next to it would keep exactly what was meant to be erased — a checkbox preserves it for those who want the safety net. Source files in `data/raw/` are left alone, and the page states plainly how many remain: those are the user's files, not the contents of the database. The block sits above every `st.stop()` on the page and is collapsed, and the button cannot be pressed without a confirmation checkbox. The same operation is available as the `clear` command, with a typed confirmation and the `--yes` / `--keep-backup` flags. Verifying by clicking found a real bug: on a completely empty database the Overview crashed on `source_sha256[:12]` — after clearing there is no digest. `missing_facts_notice()` also learned to tell an empty database from one without sizes, and offers to load data instead of a pointless "table sizes not loaded". |

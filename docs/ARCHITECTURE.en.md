@@ -79,7 +79,7 @@ and the views still work.
 | `profile_source.py` | Showing the structure of a file before loading |
 | `export_html.py` | Building the standalone HTML |
 | `sample_data.py` | Synthetic data for checks without real files |
-| `cli.py` | Commands `profile`, `build`, `export-html`, `sample`, `diagnose` |
+| `cli.py` | Commands `profile`, `build`, `export-html`, `sample`, `diagnose`, `clear` |
 
 **Key properties:**
 

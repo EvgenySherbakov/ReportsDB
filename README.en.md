@@ -82,6 +82,7 @@ it fails with "No module named reportsdb".
 scripts\rdb.bat profile data\raw\reports.xlsx   :: what is in the file
 scripts\rdb.bat build   data\raw\reports.xlsx   :: build the database
 scripts\rdb.bat diagnose                        :: reconcile sizes with the database
+scripts\rdb.bat clear                           :: erase all data
 scripts\run.bat                                 :: look at the data
 ```
 
@@ -89,6 +90,7 @@ scripts\run.bat                                 :: look at the data
 scripts/rdb.sh profile data/raw/reports.xlsx    # what is in the file
 scripts/rdb.sh build   data/raw/reports.xlsx    # build the database
 scripts/rdb.sh diagnose                         # reconcile sizes with the database
+scripts/rdb.sh clear                            # erase all data
 scripts/run.sh                                  # look at the data
 ```
 
@@ -96,6 +98,14 @@ scripts/run.sh                                  # look at the data
 it shows which columns were recognised, how many rows of each segment type were
 counted, and whether the total matches the database. It never prints table
 names — only numbers.
+
+`clear` erases all loaded data and leaves an empty database of the right
+structure — the analytics still opens and shows zeros. `reports.duckdb.bak` is
+deleted along with the database: clearing is asked for when working data should
+not remain on the machine, and a backup next to it would keep exactly what was
+meant to be erased (`--keep-backup` if you want it). The same thing exists in
+the UI: **Load data → Clear the database**. Source files in `data/raw/` are left
+alone.
 
 Column names are not hard-coded anywhere — only in `config/mapping.yml`.
 

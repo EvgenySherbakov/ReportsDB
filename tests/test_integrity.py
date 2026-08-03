@@ -21,7 +21,7 @@ from reportsdb.config import (  # noqa: E402
     resolve_columns,
 )
 from reportsdb.config import SCHEMA_VERSION  # noqa: E402
-from reportsdb.etl import build  # noqa: E402
+from reportsdb.etl import build, clear  # noqa: E402
 from reportsdb.normalize import (  # noqa: E402
     join_folders,
     normalise_catalog_path,
@@ -1062,6 +1062,80 @@ def test_view_prefix_recognised_but_never_overrides_real_tables(tmp_path):
     assert kinds["dbo.v_stored"].startswith("TABLE"), (
         "объект с сегментами в файле размеров обязан остаться таблицей"
     )
+
+
+# --- Очистка базы ---------------------------------------------------------
+
+def test_clear_leaves_an_empty_but_working_database(paths, tmp_path):
+    """Очистка стирает данные, но оставляет базу, на которой работает аналитика.
+
+    Пустая база, а не удалённый файл: иначе каждая страница встречала бы
+    пользователя ошибкой «база не найдена» вместо честных нулей.
+    """
+    mapping = load_mapping()
+    mapping.table_sizes.file = str(paths["sizes"])
+    mapping.report_usage.file = str(paths["usage"])
+    db = tmp_path / "reports.duckdb"
+    build(paths["reports"], db, mapping)
+
+    con = duckdb.connect(str(db), read_only=True)
+    assert con.execute("SELECT COUNT(*) FROM dim_report").fetchone()[0] > 0
+    con.close()
+
+    result = clear(db)
+    assert db.exists(), "файл базы должен остаться — пустым, но рабочим"
+    assert result.freed_bytes > 0
+
+    con = duckdb.connect(str(db), read_only=True)
+    for table in ("dim_report", "dim_table", "bridge_report_table",
+                  "fact_table_size", "fact_report_usage", "etl_reject"):
+        assert con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0, table
+
+    # Витрины обязаны работать на пустой базе — иначе очистка ломает приложение.
+    for view in VIEWS:
+        con.execute(f"SELECT * FROM {view}").fetchall()
+
+    # По журналу видно, что базу очистили, а не что её никогда не собирали.
+    run = con.execute(
+        "SELECT source_file, rows_read, schema_version FROM etl_run"
+    ).fetchone()
+    con.close()
+    assert run[1] == 0
+    assert run[2] == SCHEMA_VERSION, "версия структуры должна остаться текущей"
+
+
+def test_clear_removes_the_backup_unless_asked_to_keep_it(paths, tmp_path):
+    """По умолчанию `.bak` удаляется вместе с базой.
+
+    Очистку просят, когда рабочих данных на машине быть не должно. Копия
+    рядом с пустой базой сохранила бы ровно то, что просили стереть.
+    """
+    mapping = load_mapping()
+    mapping.table_sizes.file = str(paths["sizes"])
+    mapping.report_usage.file = str(paths["usage"])
+
+    for keep, must_exist in ((False, False), (True, True)):
+        db = tmp_path / f"keep_{keep}.duckdb"
+        build(paths["reports"], db, mapping)
+        build(paths["reports"], db, mapping)  # вторая сборка создаёт .bak
+        backup = db.with_suffix(db.suffix + ".bak")
+        assert backup.exists(), "вторая сборка обязана оставить резервную копию"
+
+        result = clear(db, keep_backup=keep)
+        assert backup.exists() is must_exist
+        assert result.backup_removed is not keep
+
+
+def test_clear_does_not_touch_source_files(paths, tmp_path):
+    """Исходные файлы пользователя — не содержимое базы, их очистка не трогает."""
+    mapping = load_mapping()
+    mapping.table_sizes.file = str(paths["sizes"])
+    db = tmp_path / "reports.duckdb"
+    build(paths["reports"], db, mapping)
+
+    clear(db)
+    assert paths["reports"].exists()
+    assert paths["sizes"].exists()
 
 
 # --- Витрины на пустых фактах --------------------------------------------

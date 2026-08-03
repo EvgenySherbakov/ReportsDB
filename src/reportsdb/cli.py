@@ -48,6 +48,18 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("sample", help="сгенерировать синтетические данные в data/raw/")
 
+    p_clear = sub.add_parser(
+        "clear", help="стереть все данные, оставив пустую базу"
+    )
+    p_clear.add_argument("--db", type=Path, default=DB_PATH)
+    p_clear.add_argument(
+        "--keep-backup", action="store_true",
+        help="не удалять reports.duckdb.bak (по умолчанию удаляется вместе с базой)",
+    )
+    p_clear.add_argument(
+        "--yes", action="store_true", help="не спрашивать подтверждения",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "profile":
@@ -97,6 +109,31 @@ def main(argv: list[str] | None = None) -> int:
         return diagnose(
             load_mapping(args.config), args.db, args.file, args.show_names
         )
+
+    if args.command == "clear":
+        from .etl import clear
+
+        if not args.yes:
+            # Действие необратимое, а команду легко набрать по ошибке вместо
+            # `build`. Ответ читается с клавиатуры, ключ `--yes` — для скриптов.
+            answer = input(
+                f"Стереть все данные в {args.db}? Введите «да» для подтверждения: "
+            )
+            if answer.strip().lower() not in {"да", "yes", "y"}:
+                print("Отменено, ничего не изменилось.")
+                return 1
+
+        result = clear(args.db, keep_backup=args.keep_backup)
+        print(f"База очищена: {args.db}")
+        print(f"Освобождено: {result.freed_bytes / 1024 / 1024:.1f} МБ")
+        if result.backup_removed:
+            print("Резервная копия reports.duckdb.bak удалена.")
+        if result.raw_files_left:
+            print(
+                f"Исходные файлы в data/raw/ не тронуты: {result.raw_files_left}. "
+                "Их нужно удалить отдельно, если они больше не нужны."
+            )
+        return 0
 
     if args.command == "export-html":
         from .export_html import export

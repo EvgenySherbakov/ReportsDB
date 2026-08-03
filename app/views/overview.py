@@ -13,6 +13,7 @@ from _shared import (
     ACCENT,
     donut,
     download,
+    is_blank,
     missing_facts_notice,
     num,
     page_setup,
@@ -279,7 +280,10 @@ with q2:
 run = query("SELECT * FROM etl_run ORDER BY run_id DESC LIMIT 1")
 if not run.empty:
     r = run.iloc[0]
+    # После очистки базы слепка нет: файлов, из которых её собрали, тоже нет.
+    # Без этой проверки страница падала на `None[:12]`.
+    digest = "" if is_blank(r.source_sha256) else f", sha256 `{r.source_sha256[:12]}…`"
     st.caption(
         f"Загружено из `{r.source_file}` — {r.started_at:%Y-%m-%d %H:%M}, "
-        f"версия {r.tool_version}, sha256 `{r.source_sha256[:12]}…`"
+        f"версия {r.tool_version}{digest}"
     )

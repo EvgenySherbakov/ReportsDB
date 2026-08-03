@@ -78,7 +78,7 @@
 | `profile_source.py` | Показ структуры файла до загрузки |
 | `export_html.py` | Сборка автономного HTML |
 | `sample_data.py` | Синтетические данные для проверки без реальных файлов |
-| `cli.py` | Команды `profile`, `build`, `export-html`, `sample`, `diagnose` |
+| `cli.py` | Команды `profile`, `build`, `export-html`, `sample`, `diagnose`, `clear` |
 
 **Ключевые свойства:**
 

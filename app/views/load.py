@@ -183,6 +183,70 @@ else:
             f"загружено {run[2]}, отброшено {run[3]}."
         )
 
+# --- Очистка базы ------------------------------------------------------------
+# Блок стоит здесь, а не внизу страницы: ниже есть st.stop() на случай пустой
+# папки и невыбранного файла отчётов, и кнопка за ними просто не отрисуется —
+# ровно так однажды пропала сборка HTML. Свёрнутый блок и обязательный флажок
+# защищают от случайного нажатия.
+
+if DB_PATH.exists():
+    with st.expander("🗑️ Очистить базу", expanded=False):
+        st.caption(
+            "Стирает **все загруженные данные**: отчёты, таблицы, размеры и "
+            "статистику. Останется пустая база нужной структуры — страницы "
+            "аналитики будут открываться и показывать нули, а не ошибку."
+        )
+        size_mb = DB_PATH.stat().st_size / 1024 / 1024
+        backup = DB_PATH.with_suffix(DB_PATH.suffix + ".bak")
+        raw_count = len([p for p in RAW_DIR.iterdir() if p.is_file()]) if RAW_DIR.exists() else 0
+
+        st.warning(
+            f"Будет удалено: база `{DB_PATH.name}` ({size_mb:.1f} МБ)"
+            + (f" и резервная копия `{backup.name}` "
+               f"({backup.stat().st_size / 1024 / 1024:.1f} МБ)"
+               if backup.exists() else "")
+            + ".\n\n**Отменить это нельзя.** Чтобы вернуть данные, придётся "
+              "загрузить файлы заново.",
+            icon="⚠️",
+        )
+        if raw_count:
+            st.info(
+                f"Исходные файлы в `{RAW_DIR}` не тронутся — их там "
+                f"{raw_count}. Если данные не должны оставаться на машине, "
+                "удалите их отдельно, обычным способом.",
+                icon="📁",
+            )
+
+        keep_backup = st.checkbox(
+            "Оставить резервную копию `reports.duckdb.bak`",
+            help="По умолчанию копия удаляется вместе с базой: рядом с пустой "
+                 "базой она сохранила бы ровно то, что просили стереть.",
+        )
+        confirmed = st.checkbox(
+            "Да, стереть все данные из базы", key="clear_confirm",
+            help="Флажок нужен, чтобы кнопку нельзя было нажать случайно.",
+        )
+        if st.button(
+            "Очистить базу", type="secondary", use_container_width=True,
+            disabled=not confirmed,
+        ):
+            from reportsdb.etl import clear
+
+            release_db()  # тот же порядок, что при пересборке: сначала отпустить файл
+            try:
+                result = clear(DB_PATH, keep_backup=keep_backup)
+            except Exception as exc:  # noqa: BLE001 — причина нужна пользователю
+                st.error(f"Не удалось очистить базу:\n\n```\n{type(exc).__name__}: {exc}\n```")
+                st.stop()
+
+            st.success(
+                f"База очищена, освобождено "
+                f"{result.freed_bytes / 1024 / 1024:.1f} МБ."
+                + (" Резервная копия удалена." if result.backup_removed else "")
+            )
+            st.session_state.pop("clear_confirm", None)
+            st.rerun()
+
 st.divider()
 
 # --- Шаг 1: файлы ----------------------------------------------------------

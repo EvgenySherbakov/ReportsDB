@@ -172,6 +172,70 @@ def build(
 
 
 @dataclass
+class ClearResult:
+    """Что именно удалила очистка — чтобы отчитаться перед пользователем."""
+
+    freed_bytes: int = 0
+    backup_removed: bool = False
+    raw_files_left: int = 0
+
+
+def clear(db_path: Path = DB_PATH, keep_backup: bool = False) -> ClearResult:
+    """Стирает все данные, оставляя пустую базу нужной структуры.
+
+    Пустая база, а не удалённый файл: страницы аналитики продолжают
+    открываться и честно показывают нули, а не падают на «база не найдена».
+    Версия структуры при этом остаётся текущей, поэтому предупреждения
+    «база собрана прежней версией» тоже не возникает.
+
+    Резервная копия по умолчанию **удаляется вместе с базой**. Очистку
+    просят, когда рабочих данных на машине быть не должно, а `.bak` рядом с
+    пустой базой сохранил бы ровно то, что просили стереть. Кому нужна
+    страховка — `keep_backup=True`.
+
+    Исходные файлы в `data/raw/` не трогаются: это отдельные файлы
+    пользователя, а не содержимое базы. Их число возвращается, чтобы
+    интерфейс мог сказать об этом прямо.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    backup = db_path.with_suffix(db_path.suffix + ".bak")
+
+    result = ClearResult()
+    if db_path.exists():
+        result.freed_bytes += db_path.stat().st_size
+        db_path.unlink()
+    if backup.exists():
+        if keep_backup:
+            result.backup_removed = False
+        else:
+            result.freed_bytes += backup.stat().st_size
+            backup.unlink()
+            result.backup_removed = True
+
+    con = duckdb.connect(str(db_path))
+    try:
+        _run_sql_file(con, SQL_DIR / "01_schema.sql")
+        _run_sql_file(con, SQL_DIR / "02_views.sql")
+        # Запись в журнал: иначе по базе не отличить «только что очищена» от
+        # «никогда не собиралась», а это разные ситуации.
+        con.execute(
+            """
+            INSERT INTO etl_run (run_id, started_at, source_file, source_sha256,
+                                 rows_read, rows_loaded, rows_rejected, tool_version,
+                                 schema_version)
+            VALUES (1, ?, ?, NULL, 0, 0, 0, ?, ?)
+            """,
+            [datetime.now(), "(база очищена)", VERSION, SCHEMA_VERSION],
+        )
+    finally:
+        con.close()
+
+    if RAW_DIR.exists():
+        result.raw_files_left = sum(1 for p in RAW_DIR.iterdir() if p.is_file())
+    return result
+
+
+@dataclass
 class SizesIndex:
     """Что известно про объекты из файла размеров ещё до разбора отчётов."""
 

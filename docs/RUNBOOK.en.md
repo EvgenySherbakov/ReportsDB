@@ -333,6 +333,41 @@ Warnings, if something did not add up:
 The previous database is kept next to the new one as `reports.duckdb.bak` — if
 you loaded the wrong file, you can restore it by renaming it back.
 
+### How to erase all data
+
+On the same page, right under the current state, there is a collapsed
+**🗑️ Clear the database** block. It erases everything loaded: reports, tables,
+sizes and statistics.
+
+1. Expand the block — it states exactly what will be deleted and how many
+   megabytes that is.
+2. Tick **"Yes, erase all data from the database"** — without it the button
+   cannot be pressed.
+3. Press **Clear the database**.
+
+What happens:
+
+- an **empty database of the right structure** remains, rather than a deleted
+  file: the analytics pages still open and honestly show zeros;
+- the **`reports.duckdb.bak` backup is deleted along with the database.**
+  Clearing is asked for when working data should not remain on the machine, and
+  a backup next to an empty database would keep exactly what was meant to be
+  erased. If you want the safety net, tick "Keep the backup";
+- **source files in `data/raw/` are left alone.** Those are your files, not the
+  contents of the database. If the data must not stay on the machine, delete
+  them separately, the usual way.
+
+**Clearing cannot be undone.** To get the data back, load the files again.
+
+The same from the command line:
+
+```bat
+scripts\rdb.bat clear
+```
+
+(macOS/Linux — `scripts/rdb.sh clear`.) The command asks for confirmation;
+`--yes` skips it and `--keep-backup` preserves the `.bak`.
+
 ---
 
 ## Frequently asked questions

@@ -11,7 +11,22 @@ file records only what a user can see.
 
 ## [Unreleased]
 
-Changes made after 1.0.0 land here until the next version ships.
+### Added
+
+- **Clearing the database** on the "Load data" page: a collapsed block with a
+  confirmation erases all loaded data. An empty database of the right structure
+  remains — the analytics still opens and shows zeros. The
+  `reports.duckdb.bak` backup is deleted along with the database (a checkbox
+  keeps it), and source files in `data/raw/` are left alone. The same thing as
+  the `scripts\rdb.bat clear` command.
+
+### Fixed
+
+- The Overview crashed on a completely empty database: after clearing there is
+  no digest of the source files, and the caption at the bottom of the page
+  ended in an error.
+- On an empty database the missing-data warning said "table sizes not loaded"
+  instead of stating that the database is empty and offering to load files.
 
 ## [1.0.0] — 2026-08-02
 
