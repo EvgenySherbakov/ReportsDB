@@ -34,10 +34,12 @@ file records only what a user can see.
 - **All reports for the found tables at once** on №2 → "By tables": a block with
   "table + report" relations for the whole found list. Previously reports could
   only be seen one table per click.
-- **That block exports to Excel, as two sheets.** "Отчёты": one row per report,
-  how many of your tables it holds and which ones, separated by `;`. "Таблицы и
-  отчёты": the same pairs as on screen. Russian headers, frozen header row,
-  fitted column widths, and numbers stay numbers.
+- **That block exports to Excel, as two sheets.** "Отчёты": as many rows as
+  there are reports, one per plant; the "Таблицы" column lists **all** of the
+  report's tables separated by `;`, not only the found ones, plus an
+  "Из них из запроса" column. "Таблицы": as many rows as there are found
+  tables, with all of a table's reports separated by `;`. Russian headers,
+  frozen header row, fitted column widths, and numbers stay numbers.
 - `.streamlit/config.toml` was added to the Docker image: inside the container
   the dark theme was lost, a rim appeared around chart segments, and Streamlit
   usage statistics were switched back on.

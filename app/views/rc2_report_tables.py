@@ -179,37 +179,66 @@ with by_tables:
                 },
                 height=table_height(len(linked), 420),
             )
-            # Свод по отчётам: строка — отчёт, его таблицы из запроса одной
-            # ячейкой. Именно с этим листом работают дальше — «сколько наших
-            # таблиц держит каждый отчёт и какие именно».
+            # Лист 1: строка — отчёт, по одной на каждый завод. В колонке
+            # «Таблицы» — ВСЕ таблицы отчёта, а не только попавшие в запрос:
+            # список таблиц берут, чтобы понять, из чего отчёт состоит целиком,
+            # и урезанный до запроса перечень отвечал бы на другой вопрос.
+            # Сколько именно ваших таблиц он задевает — отдельной колонкой.
+            report_keys = ["report_name", "network", "plant", "catalog_path"]
+            all_tables = (
+                df.merge(found_t[["table_full_name"]].assign(_asked=True),
+                         on="table_full_name", how="left")
+                .assign(_asked=lambda d: d["_asked"].fillna(False))
+            )
+            # Только отчёты, которые задевают найденные таблицы: остальные к
+            # этому запросу отношения не имеют.
+            wanted = set(map(tuple, linked[report_keys].drop_duplicates().values))
+            mine = all_tables[
+                all_tables[report_keys].apply(tuple, axis=1).isin(wanted)
+            ]
             by_report = (
-                linked.groupby(
-                    ["report_name", "network", "plant", "catalog_path"],
-                    as_index=False, dropna=False,
-                )
+                mine.groupby(report_keys, as_index=False, dropna=False)
                 .agg(
                     table_count=("table_full_name", "nunique"),
+                    asked_count=("_asked", "sum"),
                     table_names=("table_full_name",
                                  lambda c: "; ".join(sorted(set(c)))),
                     total_mb=("total_mb", "sum"),
                 )
-                .sort_values(["table_count", "report_name"],
+                .rename(columns={"asked_count": "asked_table_count"})
+                .sort_values(["asked_table_count", "report_name"],
                              ascending=[False, True])
             )
+
+            # Лист 2: строка — таблица, её отчёты одной ячейкой. Зеркало
+            # первого листа: там отчёт и его таблицы, здесь таблица и её
+            # отчёты. Пары «таблица + отчёт» видно на экране выше.
+            by_table = (
+                linked.groupby(["table_full_name"], as_index=False)
+                .agg(
+                    report_count=("report_name", "nunique"),
+                    report_names=("report_name",
+                                  lambda c: "; ".join(sorted(set(c)))),
+                    total_mb=("total_mb", "max"),
+                )
+                .sort_values(["report_count", "table_full_name"],
+                             ascending=[False, True])
+            )
+
             download_excel(
-                {
-                    "Отчёты": by_report,
-                    "Таблицы и отчёты": linked,
-                },
+                {"Отчёты": by_report, "Таблицы": by_table},
                 "rc_2_tables_to_reports.xlsx",
                 "⬇️ Выгрузить в Excel: два листа",
             )
             st.caption(
                 "Строка — пара «таблица + отчёт», поэтому один отчёт "
-                "встречается столько раз, сколько ваших таблиц он использует. "
-                "В файле Excel два листа: **«Отчёты»** — строка на отчёт, "
-                "сколько ваших таблиц он держит и какие именно (через `;`); "
-                "**«Таблицы и отчёты»** — те же пары, что в таблице выше."
+                "встречается столько раз, сколько ваших таблиц он использует.\n\n"
+                "В файле Excel два листа. **«Отчёты»** — строка на отчёт, по "
+                "одной на каждый завод: в колонке «Таблицы» перечислены через "
+                "`;` **все** таблицы этого отчёта, а не только ваши; сколько "
+                "именно ваших он задевает — в колонке «Из них из запроса». "
+                "**«Таблицы»** — строка на таблицу, в колонке «Отчёты» все её "
+                "отчёты через `;`."
             )
 
     picked_t = row_picker(

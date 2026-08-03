@@ -500,10 +500,17 @@ relations, not a list of reports.
 The **"Export to Excel: two sheets"** button produces an `.xlsx` with two
 sheets:
 
-| Sheet | Row | Columns |
+| Sheet | Rows | What a row holds |
 | --- | --- | --- |
-| **Отчёты** (Reports) | a report | network, plant, catalog, how many of your tables it holds, the tables themselves separated by `;`, the total volume |
-| **Таблицы и отчёты** (Tables and reports) | a "table + report" pair | the same as on screen |
+| **Отчёты** (Reports) | as many as there are reports | The report (one row per plant), network, plant, catalog, **all** of its tables separated by `;`, how many there are in total and how many of them are yours, the total volume |
+| **Таблицы** (Tables) | as many as there are found tables | The table, how many reports hold it, the reports themselves separated by `;`, the volume |
+
+On the "Отчёты" sheet, the "Таблицы" column lists **all** of the report's
+tables, not only the ones you searched for: the list is taken to understand what
+the report consists of as a whole. How many of your tables it touches is a
+separate column, "Из них из запроса".
+
+"Table + report" pairs do not go into the file — they are visible on screen.
 
 The header row is frozen and column widths are fitted — the file opens ready to
 read. Numbers stay numbers, so formulas and sorting work immediately.

@@ -278,6 +278,8 @@ LABELS = {
     "reports_with_view": "Из них через view",
     "table_count": "Таблиц",
     "table_names": "Таблицы",
+    "asked_table_count": "Из них из запроса",
+    "report_names": "Отчёты",
     "sized_table_count": "Из них с размером",
     "exclusive_table_count": "Эксклюзивных таблиц",
     "gross_rows": "Строк, всего",
