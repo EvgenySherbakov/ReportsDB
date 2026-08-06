@@ -106,22 +106,10 @@ reports:
       - Функции
       - Functions
       - Procedures
-    # Статистика использования прямо в основном файле.
-    exec_count:
-      - Кол-во обращений
-      - Количество обращений
-      - Кол-во запусков
-      - Executions
-      - Exec Count
-    avg_duration_sec:
-      - Ср. дл. (сек)
-      - Ср. длительность (сек)
-      - Средняя длительность (сек)
-      - Avg Duration Sec
-    # То же в миллисекундах — при загрузке делится на 1000.
-    avg_duration_ms:
-      - Avg Duration Ms
-      - Ср. дл. (мс)
+    # Статистика использования (exec_count, avg_duration_sec) сюда НЕ входит:
+    # даже если в файле есть такие колонки, они не читаются. Частота и
+    # длительность приходят только из отдельного файла — раздел report_usage
+    # ниже.
     description:
       - Description
       - Описание
@@ -213,8 +201,8 @@ table_sizes:
   # LOB-сегменты) пропускаются: связать их с таблицей по выгрузке нельзя.
   segment_types: ["TABLE", "TABLE PARTITION", "TABLE SUBPARTITION"]
 
-# Отдельный файл со статистикой использования. Нужен, только если этих данных
-# нет в основном файле; загруженное отсюда перекрывает значения из него.
+# Отдельный файл со статистикой использования — единственный источник
+# exec_count и avg_duration_sec.
 report_usage:
   file: sample_report_usage.xlsx
   sheet: null
@@ -263,3 +251,25 @@ report_usage:
     period_end:
       - Period End
       - Конец периода
+
+# Текст SQL-запроса отчёта — необязательный отдельный файл, сопоставление по
+# имени отчёта.
+report_sql:
+  file: null
+  sheet: null
+  header_row: 0
+  columns:
+    report_name:
+      - Наименование отчёта
+      - Наименование отчета
+      - Report
+      - Report Name
+      - Отчёт
+      - Отчет
+    sql_text:
+      - Запрос к базе данных
+      - SQL
+      - SQL-запрос
+      - SQL Query
+      - Query
+      - Текст запроса

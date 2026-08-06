@@ -81,8 +81,11 @@ reference only — the strings themselves must not be changed):
 | `Mat.view` | `source_matviews` | List of materialised views |
 | `Временные таблицы` | `source_temp_tables` | Temporary and generated objects |
 | `Функции/процедуры` | `source_routines` | List of functions and procedures |
-| `Ср. дл. (сек)` | `avg_duration_sec` | Average query duration, seconds |
-| `Кол-во обращений` | `exec_count` | How many times the report ran |
+
+The customer showed the real shape of the main file: it physically carries
+`Ср. дл. (сек)` and `Кол-во обращений` columns (an older export format), but
+they are **not read** — `reports.columns` in `mapping.yml` no longer knows these
+fields. The only source of usage statistics is a separate file, see below.
 
 Parsing rules:
 
@@ -117,11 +120,26 @@ means the object is physically stored — it is a table, whatever it is called.
 For that, before parsing the reports, not only a schema index is built from the
 sizes file (see section 7, item 2.1) but also the set of all names in it.
 
-**Usage statistics arrive in the main file.** The `Кол-во обращений` and
-`Ср. дл. (сек)` columns are loaded straight into `fact_report_usage`. A separate
-statistics file is still supported and **overrides** these values: it is
-considered the fresher source and may carry fields the main file does not
-(users, period boundaries).
+**Usage statistics — a separate file only.** The `Кол-во обращений` and
+`Ср. дл. (сек)` columns in the main file are never read; `fact_report_usage` is
+filled exclusively by the `report_usage` section. It was not always this way:
+before this decision usage statistics came straight from the main file, and the
+separate file was an optional override — the customer explicitly asked to split
+the sources, because the main file is sent less often and its statistics go
+stale. Matching a row to a report goes through three tiers, from precise to
+coarse: `(network, plant, catalog, name)` → `(network, plant, name)` → a bare
+name if it is unique across the database. The second tier exists specifically
+for files without a "Каталог" (catalog path) column — the usual shape of a
+usage export: without it the same report name on different plants made matching
+ambiguous, and the row was simply dropped.
+
+**A report's SQL query text is also a separate, optional file**
+(`report_sql`): report name and query text, with no ТС or Завод. Matching is by
+name only, and the text found is **applied to every report sharing that name**:
+a query is a property of the report's definition, not of a specific plant, and
+the same report on three plants must get the same text rather than get lost to
+"ambiguity" the way usage statistics would. Shown on the report card, on its own
+tab; stored in `dim_report.sql_text`. `SCHEMA_VERSION` was raised to 13.
 
 ### 3.1.1. Data never leaves the machine
 
@@ -226,6 +244,7 @@ A star schema with a bridge for the many-to-many relation.
 | `folder_depth` | `INTEGER` | Nesting depth |
 | `description` | `VARCHAR` | Optional |
 | `owner` | `VARCHAR` | Optional |
+| `sql_text` | `VARCHAR` | SQL query text — from the separate `report_sql` file, matched by report name |
 | `source_row` | `INTEGER` | Row number in the source file — for tracing |
 
 `UNIQUE (network, plant, catalog_path, report_name)`.
@@ -691,7 +710,8 @@ Pages:
    1.5. **Report card** — the report list as full-width row buttons: a click
    anywhere in the row unfolds the full picture, a second click folds it back.
    It shows which tables the report uses and how much each weighs, how many
-   times it ran, its views, temporary objects and routines, and neighbouring
+   times it ran, its views, temporary objects and routines, the SQL query text
+   (if a `report_sql` file was loaded) on its own tab, and neighbouring
    reports using the same tables. Sorting is a separate control; the full table
    with column sorting and export lives in a collapsed block.
 
@@ -918,7 +938,10 @@ as on real data:
 - [x] Loading through the interface: file selection, preview, the "Load" button.
 - [x] Verified on the customer's real file (locally, outside the repository).
 - [x] The sizes file structure (a database segment export) is supported.
-- [x] Usage frequency and duration are loaded from the main file.
+- [x] Usage frequency and duration are loaded from a separate file
+      (`report_usage`); these columns are not read from the main file.
+- [x] A report's SQL query text is loaded from a separate file (`report_sql`)
+      and shown on the report card.
 - [ ] A real sizes file has been loaded.
 
 ---
@@ -999,3 +1022,6 @@ versions in the same commit.
 | 2026-08-06 | **The premise of the previous entry was wrong: networks not only can be compared with each other, they must be.** The earlier decision assumed that networks run their business independently and a report matching across them means nothing, so uniqueness was computed inside one network only. The customer corrected it: the networks overlap by roughly 70% of their reports, and the main question is how they **differ**; inside one network the number of unique reports per plant is in fact noticeably smaller. The comparison scope stopped being a principle and became a choice: in the view it is the `scope` column (`NETWORK` — other networks, `PLANT` — other plants of its own network), and on the page a switch, defaulting to the cross-network view. The `v_report_plant_twin` view was renamed to `v_report_twin` (one row per "report × scope"), and `v_network_report_twin` was added next to it. The second one is needed because of the unit of counting: for the question "how do the networks differ", a report standing on three plants of one network is **one** report of that network, and counting it three times would inflate its "own" threefold; so plants are collapsed there, tables are taken as the union across plants, and volume and executions are summed. A twin in other networks is determined by the worst case for uniqueness: if at least one site found a twin, the report exists in other networks. The demo data was fixed along the way: names there were unique by construction, which made the page show 100% unique on the demo database and check nothing. "Network-wide" reports were added — one name across different networks and on several plants of a network, with some copies drifting by a single table so that the similarity threshold is visible at work. What stayed the same: only real tables are compared, the "at least two shared tables" floor holds, a pair must be between different DCs (inside one plant similar reports are `v_report_overlap`'s job), namesakes are compared through `LOWER(TRIM(...))`, and the uniqueness threshold is set by the reader rather than the view. `SCHEMA_VERSION` was raised to 12. |
 | 2026-08-06 | **A busy database used to take down the whole app, not just the current query.** DuckDB will not let a single file be open for reading and writing at the same time — a file has exactly one holder of its configuration. Three spots in the code opened a connection unguarded: the cached `connect()` in `_shared.py` (used by every analytics page) and two direct calls on the "Load data" page. If the file was busy at that moment — say, another tab of the same running app is mid-`build()` or mid-`clear()`, both of which hold the file open for writing for several seconds — `duckdb.connect(read_only=True)` raised an unhandled `duckdb.ConnectionException` and broke the whole Streamlit session's script with a full-screen traceback. Worse, this broke "Load data" itself, which by the code's own comment is supposed to be the recovery path for any read failure — the recovery path needed recovering. Added `try_read_only_connect()`: three attempts with a short pause (up to ~0.9s — for quick internal races, not for a whole rebuild) and `None` instead of an unhandled exception. `connect()` shows `st.error` and `st.stop()` on `None`, the same way it already does for a missing database or a stale structure. On "Load data" this is deliberately a different case: `st.stop()` is not acceptable there, the "Load" button must stay clickable, so both spots show `st.info`/`st.caption` and let the page keep rendering. The race was reproduced live: a separate process held the file open for writing while Playwright opened "Overview" and "Load data" — both pages showed the warning instead of a traceback, and "Step 1. Files" stayed usable; once the file was released, a plain refresh brought the pages back to normal without restarting the app. |
 | 2026-08-06 | **A usage-statistics file without a "Каталог" column lost rows whenever report names repeated.** The customer showed the real shape of such a file: ТС (network), Завод (plant) and Наименование отчёта (report name) columns — no single "Каталог" (catalog path) column, which in the main file is assembled from three nesting levels and was never rebuilt inside `_load_report_usage`. Matching a report went through two tiers: the full path `(network, plant, path, name)` — unreachable without a "Каталог" column in the usage file — and straight to name-only `by_name`, where several candidates meant giving up. Nothing in between used the network and plant the file actually carries. On the demo data, where names were deliberately made to repeat across plants after the "network-wide" reports were added, this dropped 18 out of 175 usage rows — silently, more noticeable than the `usage_unmatched` count shown on the load page. An intermediate `(network, plant, name)` tier was added: checked after the full path and before the bare name, using what the file usually has and needing no "Каталог" column. Ambiguity within one plant (the same report twice under different catalog paths — rare but allowed by `dim_report`'s key) still means giving up rather than guessing. After the fix the demo data loses zero rows. Locked down by a test with a synthetic pair of reports sharing one name on two plants of one network: executions must land on their own plant, not get mixed up or dropped. ETL-only change, `SCHEMA_VERSION` was not raised — a data reload is only needed by whoever uses a standalone usage file without a "Каталог" column. |
+| 2026-08-06 | **Usage statistics — a separate file only, and SQL query text was added.** The customer corrected the previous entry's decision: the `Кол-во обращений` and `Ср. дл. (сек)` columns physically remain in the main reports file (an older export format nobody is going to change), but they may no longer be read from there — the sole source of usage statistics is now the `report_usage` file. Reason: the main file is sent less often than statistics change, its numbers go stale, and stale data risks silently passing for current. Reading of `exec_count`/`avg_duration_sec`/`avg_duration_ms` was removed from `reports.columns` (`config/mapping.yml` and `config/mapping.sample.yml`), along with the whole insert into `fact_report_usage` inside `_load_reports` — a missing column used to be silently backfilled empty, now the column is not read at all, so there is nothing to backfill. The `INSERT OR REPLACE` comment in `_load_report_usage` was simplified too: it used to explain overriding the main file's values, which no longer exist, and REPLACE now stays purely as a guard against a primary-key conflict on repeated matching. The demo `sample_reports.xlsx` deliberately kept these columns filled: that is exactly the check that they are truly ignored, not merely absent.
+
+The second half is a new `report_sql` file: report name and SQL query text, shown on its own tab of the report card. The file has no ТС or Завод — a query describes the report's definition, not a specific site — so matching is by name only, and the text found is **applied to every `report_id` sharing that name**, not to a single "most likely" one. That is a deliberately different rule from usage statistics: there an ambiguous name is a reason to give up (the data would land on the wrong report), while here applying the same query to a namesake report on another plant is not a mistake — it is the exact meaning of the data. `dim_report` gained a `sql_text` column (`SCHEMA_VERSION` raised to 13); `_load_report_sql` writes it through `UPDATE ... WHERE report_id = ?` after `_load_reports` has already inserted the rows — a separate pass, not a view: `sql_text` is read on the report card by a direct query against `dim_report`, with no intermediate view, the same way `description`/`owner` are. Names from the file with no match are collected into `stats.sql_unmatched`, mirroring usage statistics. The self-contained HTML export does not carry the query tab yet — its report card lives in a JS template, not Python, and porting it is a separately sized piece of work. |

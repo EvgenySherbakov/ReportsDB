@@ -53,6 +53,9 @@ CREATE TABLE dim_report (
     uses_view    BOOLEAN,
     description  VARCHAR,
     owner        VARCHAR,
+    -- Текст SQL-запроса отчёта — из отдельного файла (report_sql), сопоставлен
+    -- по имени отчёта. NULL, если файл не загружен или имя не нашлось.
+    sql_text     VARCHAR,
     source_row   INTEGER,
     -- Один и тот же отчёт может существовать для разных сетей и заводов,
     -- поэтому они входят в ключ уникальности.

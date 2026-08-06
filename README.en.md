@@ -52,12 +52,17 @@ The mapping is configured for the actual headers — no config editing needed:
 - **reports file:** `№`, `ТС` (retail network), `Завод` (plant),
   `Каталог 1/2/3-го уровня` (catalog levels), `Наименование отчета` (report
   name), `Используется view` (uses a view), `Таблицы источники данных` (source
-  tables), `Ср. дл. (сек)` (average duration), `Кол-во обращений` (execution
-  count), and — if present — `View`, `Mat.view`, `Временные таблицы` (temp
-  tables), `Функции/процедуры` (routines);
+  tables), and — if present — `View`, `Mat.view`, `Временные таблицы` (temp
+  tables), `Функции/процедуры` (routines). `Ср. дл. (сек)` and
+  `Кол-во обращений` are **not read** from this file, even where the columns
+  physically exist — statistics comes only from a separate file, see below;
 - **sizes file** (a database segment export): `OWNER`, `SEGMENT_NAME`,
   `SEGMENT_TYPE`, `SIZE_MB`, `PERCENT_OF_TOTAL`, `Глубина хранения`
-  (retention days).
+  (retention days);
+- **statistics file** (required for executions and duration):
+  `Наименование отчета`, `ТС`, `Завод`, `Кол-во обращений`, `Ср. дл. (сек)`;
+- **SQL query file** (optional): `Наименование отчета`, the query text —
+  shown on the report card.
 
 The object kind comes from the column the object is listed in. If there are no
 per-kind columns, a name mask from `config/mapping.yml` applies — one is enabled
@@ -197,8 +202,8 @@ A DC (distribution centre) is a "network + plant" pair. Menu section
 
 The **"Report card"** page: clicking a row in the report list unfolds the full
 picture — which tables the report uses and how much each weighs, how many times
-it ran, its views and procedures, and neighbouring reports sharing the same
-tables.
+it ran, its views and procedures, the SQL query text (if loaded from a separate
+file), and neighbouring reports sharing the same tables.
 
 ### Similar reports
 

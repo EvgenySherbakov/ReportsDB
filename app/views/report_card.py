@@ -155,7 +155,7 @@ if not is_blank(full["size_coverage_pct"]) and full["size_coverage_pct"] < 100:
 # --- Таблицы отчёта ----------------------------------------------------------
 
 report_id = int(full["report_id"])
-tabs = st.tabs(["Таблицы", "Функции и процедуры", "Прочие объекты"])
+tabs = st.tabs(["Таблицы", "Функции и процедуры", "Прочие объекты", "SQL-запрос"])
 
 with tabs[0]:
     tables = query(
@@ -234,6 +234,22 @@ with tabs[2]:
         st.caption("View, материализованных view и временных объектов не указано.")
     else:
         show_table(others, {"object_kind": "Тип объекта", "kind_source": "Тип определён"})
+
+with tabs[3]:
+    # Не через витрину: sql_text — свойство определения отчёта, не разреза по
+    # РЦ, и отдельный прямой запрос по report_id проще, чем тащить текст через
+    # v_report_tables_summary ради одной страницы.
+    sql_row = query(
+        "SELECT sql_text FROM dim_report WHERE report_id = ?", (report_id,)
+    )
+    sql_text = sql_row["sql_text"].iloc[0] if not sql_row.empty else None
+    if is_blank(sql_text):
+        st.caption(
+            "Текст SQL-запроса не загружен. Добавляется отдельным файлом на "
+            "странице **Загрузка данных** (роль «SQL-запросы»)."
+        )
+    else:
+        st.code(sql_text, language="sql")
 
 # --- Соседи по таблицам ------------------------------------------------------
 

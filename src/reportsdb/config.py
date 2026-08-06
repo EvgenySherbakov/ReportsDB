@@ -16,7 +16,7 @@ VERSION = "1.5.0"
 # Версия структуры БД. Поднимать при КАЖДОМ изменении sql/01_schema.sql или
 # sql/02_views.sql. Приложение сравнивает её с версией в файле базы и, если та
 # старее, просит перезагрузить данные вместо падения с ошибкой SQL.
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "config" / "mapping.yml"
@@ -90,6 +90,7 @@ class Mapping:
     reports: SectionConfig
     table_sizes: SectionConfig
     report_usage: SectionConfig
+    report_sql: SectionConfig = field(default_factory=SectionConfig)
 
 
 def load_mapping(path: Path | None = None) -> Mapping:
@@ -100,6 +101,7 @@ def load_mapping(path: Path | None = None) -> Mapping:
         reports=SectionConfig.from_dict(raw.get("reports")),
         table_sizes=SectionConfig.from_dict(raw.get("table_sizes")),
         report_usage=SectionConfig.from_dict(raw.get("report_usage")),
+        report_sql=SectionConfig.from_dict(raw.get("report_sql")),
     )
 
 

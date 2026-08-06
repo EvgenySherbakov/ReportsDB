@@ -84,6 +84,11 @@ class LoadStats:
     size_files_without_plant: bool = False
     usage_loaded: int = 0
     usage_unmatched: list[str] = field(default_factory=list)
+    # Сколько отчётов (по report_id, не по строкам файла) получили текст
+    # SQL-запроса — одна строка файла может лечь сразу на несколько report_id,
+    # если то же наименование заведено на нескольких заводах.
+    sql_loaded: int = 0
+    sql_unmatched: list[str] = field(default_factory=list)
 
 
 def _sha256(path: Path) -> str:
@@ -145,6 +150,7 @@ def build(
         _load_reports(con, sources, mapping.reports, stats, sizes_index)
         _load_table_sizes(con, mapping.table_sizes, stats)
         _load_report_usage(con, mapping.report_usage, stats)
+        _load_report_sql(con, mapping.report_sql, stats)
         _run_sql_file(con, SQL_DIR / "02_views.sql")
 
         con.execute(
@@ -332,7 +338,6 @@ def _load_reports(
     use_levels = any(level_cols)
 
     reports: list[tuple] = []
-    usage: list[tuple] = []
     rejects: list[tuple] = []
     # key → [id, схема, имя, разобрано, тип объекта, откуда известен тип]
     tables: dict[str, list] = {}
@@ -387,11 +392,6 @@ def _load_reports(
                 )
             )
             stats.rows_loaded += 1
-
-            execs = to_number(_cell(row, cols.get("exec_count")))
-            duration = _duration_sec(row, cols)
-            if execs is not None or duration is not None:
-                usage.append((report_id, _as_int(execs), duration))
 
         # Тип объекта задаётся колонкой, из которой он пришёл. Если объект
         # встретился в нескольких колонках, побеждает более надёжный источник.
@@ -458,13 +458,9 @@ def _load_reports(
          "folder_l1", "folder_l2", "folder_l3", "folder_depth", "uses_view",
          "description", "owner", "source_row"],
     )
-    _insert(
-        con,
-        "fact_report_usage",
-        usage,
-        ["report_id", "exec_count", "avg_duration_sec"],
-    )
-    stats.usage_loaded = len(usage)
+    # Статистика использования (exec_count, avg_duration_sec) в основной файл
+    # больше не пишется — единственный источник fact_report_usage теперь
+    # _load_report_usage, ниже по build().
     _insert(
         con,
         "dim_table",
@@ -732,8 +728,9 @@ def _load_report_usage(
             )
         )
 
-    # OR REPLACE: отдельный файл статистики перекрывает значения, взятые из
-    # основного файла, — он считается более свежим источником.
+    # OR REPLACE, а не INSERT: report_id уникален по PRIMARY KEY, и без REPLACE
+    # повторный вызов (например, второй проход при нескольких файлах) упал бы
+    # на конфликте ключа.
     _insert(
         con,
         "fact_report_usage",
@@ -747,7 +744,58 @@ def _load_report_usage(
         },
         replace=True,
     )
-    stats.usage_loaded = max(stats.usage_loaded, len(rows))
+    stats.usage_loaded = len(rows)
+
+
+def _load_report_sql(
+    con: duckdb.DuckDBPyConnection, section: SectionConfig, stats: LoadStats
+) -> None:
+    """Текст SQL-запроса отчёта — необязательный файл, сопоставление по имени.
+
+    В отличие от статистики использования, здесь нет ТС и Завода: запрос —
+    свойство определения отчёта, а не конкретной площадки. Поэтому текст
+    применяется сразу ко ВСЕМ отчётам с этим именем — тот же отчёт на трёх
+    заводах получает один и тот же запрос, а не остаётся пустым из-за
+    неоднозначности, как было бы при сопоставлении статистики.
+    """
+    paths = _section_files(section)
+    if not paths:
+        return
+
+    df = read_all(paths, section)
+    cols = resolve_columns(list(df.columns), section.columns)
+    if not cols.get("report_name"):
+        raise SystemExit("В файле SQL-запросов нет колонки с именем отчёта.")
+    if not cols.get("sql_text"):
+        raise SystemExit("В файле SQL-запросов нет колонки с текстом запроса.")
+
+    by_name: dict[str, list[int]] = {}
+    for rid, name in con.execute(
+        "SELECT report_id, report_name FROM dim_report"
+    ).fetchall():
+        by_name.setdefault(_low(name), []).append(rid)
+
+    updates: list[tuple] = []
+    seen_report_ids: set[int] = set()
+    for _, row in df.iterrows():
+        name = clean_text(_cell(row, cols["report_name"]))
+        text = clean_text(_cell(row, cols["sql_text"]))
+        if name is None or text is None:
+            continue
+        candidates = by_name.get(_low(name), [])
+        if not candidates:
+            stats.sql_unmatched.append(name)
+            continue
+        for rid in candidates:
+            if rid in seen_report_ids:
+                continue
+            seen_report_ids.add(rid)
+            updates.append((text, rid))
+
+    con.executemany(
+        "UPDATE dim_report SET sql_text = ? WHERE report_id = ?", updates
+    )
+    stats.sql_loaded = len(updates)
 
 
 def _low(value: str | None) -> str:
@@ -848,5 +896,10 @@ def print_summary(stats: LoadStats) -> None:
         if stats.usage_unmatched:
             preview = ", ".join(stats.usage_unmatched[:5])
             print(f"  !  использование без совпадения: {len(stats.usage_unmatched)} ({preview}…)")
+    if stats.sql_loaded or stats.sql_unmatched:
+        print(f"  отчётов с SQL-запросом: {stats.sql_loaded}")
+        if stats.sql_unmatched:
+            preview = ", ".join(stats.sql_unmatched[:5])
+            print(f"  !  запросы без совпадения: {len(stats.sql_unmatched)} ({preview}…)")
     if stats.rows_rejected:
         print("\n  Причины отбраковки — в таблице etl_reject.")

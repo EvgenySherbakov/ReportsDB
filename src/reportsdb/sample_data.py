@@ -249,9 +249,11 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
     sizes_path = RAW_DIR / "sample_table_sizes.xlsx"
     pd.DataFrame(segments)[order].to_excel(sizes_path, index=False)
 
-    # Отдельный файл статистики: нужен, только если данных нет в основном
-    # файле либо есть поля, которых там нет (пользователи, границы периода).
-    # Здесь он покрывает часть отчётов — так проверяется перекрытие значений.
+    # Отдельный файл статистики — единственный источник exec_count и
+    # avg_duration_sec: основной файл эти колонки физически несёт (строки ниже
+    # используют их как источник значений для этого файла), но загрузчик их не
+    # читает. Здесь он покрывает часть отчётов — непокрытые остаются без
+    # статистики, и это тоже часть проверки.
     usage = []
     for row in rows:
         if not row["Наименование отчета"]:
@@ -275,4 +277,35 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
     usage_path = RAW_DIR / "sample_report_usage.xlsx"
     pd.DataFrame(usage).to_excel(usage_path, index=False)
 
-    return {"reports": reports_path, "sizes": sizes_path, "usage": usage_path}
+    # Текст SQL-запроса — тоже отдельный, необязательный файл, без ТС и Завода:
+    # запрос описывает определение отчёта, а не площадку. Покрывает часть
+    # отчётов (по имени, без дублей — иначе строка перезаписывала бы себя же
+    # для отчёта на нескольких заводах) и одно заведомо несуществующее имя —
+    # проверка sql_unmatched.
+    sql_rows = []
+    seen_names: set[str] = set()
+    for row in rows:
+        name = row["Наименование отчета"]
+        if not name or name in seen_names:
+            continue
+        if rnd.random() < 0.5:
+            continue
+        seen_names.add(name)
+        tables = row["Таблицы источники данных"].split(";")
+        sql_rows.append(
+            {
+                "Наименование отчета": name,
+                "Запрос к базе данных": f"SELECT * FROM {tables[0]} WHERE 1 = 1",
+            }
+        )
+    sql_rows.append(
+        {"Наименование отчета": "Несуществующий отчёт",
+         "Запрос к базе данных": "SELECT 1"}
+    )
+    sql_path = RAW_DIR / "sample_report_sql.xlsx"
+    pd.DataFrame(sql_rows).to_excel(sql_path, index=False)
+
+    return {
+        "reports": reports_path, "sizes": sizes_path, "usage": usage_path,
+        "sql": sql_path,
+    }

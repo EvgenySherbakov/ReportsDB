@@ -56,7 +56,7 @@ over sizes and relations quickly. Its SQL is close to PostgreSQL.
 
 | Object | Contains |
 | --- | --- |
-| `dim_report` | Reports: number, name, retail network, plant, catalog levels, "uses a view" flag |
+| `dim_report` | Reports: number, name, retail network, plant, catalog levels, "uses a view" flag, SQL query text |
 | `dim_table` | Source objects: tables, views, materialised views, temporary objects, routines — distinguished by `object_kind` |
 | `bridge_report_table` | "Report ↔ table" relations, expanded from the cell holding the list |
 | `fact_table_size` | Table sizes per "table + network + plant": MB, share of database volume, segment count, retention depth |

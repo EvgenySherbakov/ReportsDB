@@ -32,6 +32,10 @@ SUFFIXES = {".xlsx", ".xls", ".xlsm", ".csv", ".tsv"}
 
 # Что означает каждое поле модели и что сломается без него. Группы совпадают со
 # смысловыми блоками исходного файла, чтобы таблицу проверки было легко читать.
+#
+# Кол-во обращений / Ср. дл. (сек) сюда осознанно НЕ входят: даже если такие
+# колонки физически есть в файле отчётов, они не читаются. Единственный
+# источник статистики — файл роли «Статистика отдельным файлом» ниже.
 REPORT_FIELDS = [
     ("report_name", "Наименование отчёта", "Обязательное", "Без него загрузка невозможна"),
     ("source_tables", "Таблицы источники данных", "Обязательное по смыслу",
@@ -54,12 +58,6 @@ REPORT_FIELDS = [
      "Временные и generated-объекты попадут в таблицу №2"),
     ("source_routines", "Функции/процедуры", "Типы объектов",
      "Таблица №3 «Отчёт → функции» останется пустой"),
-    ("exec_count", "Кол-во обращений", "Статистика",
-     "Не определить невостребованные отчёты"),
-    ("avg_duration_sec", "Ср. дл. (сек)", "Статистика",
-     "Не будет анализа времени выполнения"),
-    ("avg_duration_ms", "Длительность в мс", "Статистика (запасной вариант)",
-     "Используется, если нет колонки в секундах"),
     ("description", "Описание", "Дополнительно", "—"),
     ("owner", "Владелец", "Дополнительно", "—"),
 ]
@@ -95,6 +93,11 @@ USAGE_FIELDS = [
     ("last_executed_at", "Последний запуск", "Дополнительно", "—"),
     ("period_start", "Начало периода", "Дополнительно", "—"),
     ("period_end", "Конец периода", "Дополнительно", "—"),
+]
+
+SQL_FIELDS = [
+    ("report_name", "Наименование отчёта", "Обязательное", "Не сопоставить со справочником"),
+    ("sql_text", "Запрос к базе данных", "Обязательное", "Файл бесполезен без текста запроса"),
 ]
 
 
@@ -300,12 +303,13 @@ st.caption(
     "строки возьмётся из колонок **ТС** и **Завод** внутри файла."
 )
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 reports_files = col1.multiselect(
     "Отчёты (обязательно)", files,
     default=files[:1] if len(files) == 1 else [],
     help="Строка на отчёт: №, ТС, завод, каталог тремя уровнями, наименование, "
-         "признак view, таблицы-источники, средняя длительность, число обращений.",
+         "признак view, таблицы-источники. Кол-во обращений и длительность из "
+         "этого файла не читаются — только из роли «Статистика» справа.",
 )
 sizes_files = col2.multiselect(
     "Размеры таблиц", files,
@@ -314,8 +318,15 @@ sizes_files = col2.multiselect(
 )
 usage_files = col3.multiselect(
     "Статистика отдельным файлом", files,
-    help="Обычно не нужен: обращения и длительность уже есть в основном файле. "
-         "Если выбран — его значения перекроют данные основного файла.",
+    help="Единственный источник обращений и длительности — в файле отчётов "
+         "эти колонки не читаются, даже если физически есть. Без этой роли "
+         "статистики не будет вовсе.",
+)
+sql_files = col4.multiselect(
+    "SQL-запросы", files,
+    help="Необязательно: наименование отчёта и текст запроса. Показывается в "
+         "карточке отчёта. Сопоставление только по имени — тот же отчёт на "
+         "нескольких заводах получает один и тот же текст.",
 )
 
 if not reports_files:
@@ -355,6 +366,8 @@ if sizes_files:
     tab_names.append("Размеры таблиц")
 if usage_files:
     tab_names.append("Статистика")
+if sql_files:
+    tab_names.append("SQL-запросы")
 tabs = st.tabs(tab_names)
 
 all_losses: list[str] = []
@@ -432,14 +445,40 @@ if usage_files:
                 "сопоставить строки не с чем. Уберите файл из выбора."
             )
             st.stop()
-        st.info(
-            "Значения из этого файла **перекроют** обращения и длительность из "
-            "основного файла: он считается более свежим источником."
-        )
         if len(usage_files) > 1:
             st.caption(f"Склеено файлов: {len(usage_files)}.")
         with st.expander(f"Первые строки (всего {len(usage_preview)})"):
             st.dataframe(usage_preview.head(10), use_container_width=True, hide_index=True)
+    index += 1
+
+if sql_files:
+    with tabs[index]:
+        try:
+            sql_preview = read_all(
+                [RAW_DIR / f for f in sql_files], mapping.report_sql)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Не удалось прочитать файл SQL-запросов:\n\n```\n{exc}\n```")
+            st.stop()
+        sql_resolved = resolve_columns(
+            list(sql_preview.columns), mapping.report_sql.columns
+        )
+        show_mapping("Файл SQL-запросов", sql_resolved, SQL_FIELDS)
+        if not sql_resolved.get("report_name") or not sql_resolved.get("sql_text"):
+            st.error(
+                "В файле SQL-запросов нет колонки с именем отчёта или текстом "
+                "запроса — сопоставить нечего. Уберите файл из выбора."
+            )
+            st.stop()
+        st.info(
+            "Сопоставление только по имени отчёта: в файле нет ТС и Завода, "
+            "поэтому текст запроса применяется сразу ко всем отчётам с этим "
+            "именем — тот же отчёт на нескольких заводах получает один и тот "
+            "же запрос."
+        )
+        if len(sql_files) > 1:
+            st.caption(f"Склеено файлов: {len(sql_files)}.")
+        with st.expander(f"Первые строки (всего {len(sql_preview)})"):
+            st.dataframe(sql_preview.head(10), use_container_width=True, hide_index=True)
 
 # Блокирующая проверка — только имя отчёта.
 if not resolved.get("report_name"):
@@ -474,6 +513,7 @@ st.caption(
 if st.button("Загрузить", type="primary", use_container_width=True):
     mapping.table_sizes.files = list(sizes_files)
     mapping.report_usage.files = list(usage_files)
+    mapping.report_sql.files = list(sql_files)
 
     release_db()  # отпускаем файл БД до пересборки
 
@@ -551,6 +591,14 @@ if st.button("Загрузить", type="primary", use_container_width=True):
         st.warning(
             f"Статистика по {len(stats.usage_unmatched)} отчётам не сопоставилась "
             f"с каталогом. Например: {', '.join(stats.usage_unmatched[:5])}"
+        )
+    if stats.sql_loaded:
+        st.caption(f"SQL-запрос получили отчётов: {stats.sql_loaded}.")
+    if stats.sql_unmatched:
+        st.warning(
+            f"Запросы по {len(stats.sql_unmatched)} наименованиям не "
+            f"сопоставились с каталогом отчётов. Например: "
+            f"{', '.join(stats.sql_unmatched[:5])}"
         )
 
     con = try_read_only_connect(DB_PATH)

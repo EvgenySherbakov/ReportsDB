@@ -294,9 +294,10 @@ Formats: `.xlsx`, `.xls`, `.xlsm`, `.csv`, `.tsv`.
 
 | Field | What to choose |
 | --- | --- |
-| **Reports** | Required. One row per report: number, network, plant, three catalog levels, name, "uses a view" flag, source tables, average duration and execution count |
+| **Reports** | Required. One row per report: number, network, plant, three catalog levels, name, "uses a view" flag, source tables. Execution count and average duration are **not read** from this file, even where the columns physically exist |
 | **Table sizes** | If available. A database segment export: `ТС`, `Завод`, `OWNER`, `SEGMENT_NAME`, `SEGMENT_TYPE`, `SIZE_MB`, `PERCENT_OF_TOTAL`, `Глубина хранения`. `ТС` and `Завод` are optional, but without them a size is treated as common to all plants, whereas in reality each plant has its own |
-| **Usage frequency** | Usually not needed: execution count and duration are already in the main file. A separate file is only needed if statistics are kept separately — then its values override the main file |
+| **Statistics as a separate file** | The only source of execution count and average duration: `Наименование отчёта`, `ТС`, `Завод`, `Кол-во обращений`, `Ср. дл. (сек)`. Without this role executions and duration stay empty, even if such columns are visible in the reports file |
+| **SQL queries** | Optional. `Наименование отчёта` and the query text, with no ТС or Завод — matching is by name only, and the text is applied to every plant sharing that name. Shown on its own tab of the report card |
 
 The sizes file may be missing — load it later when it appears. The analytics
 works without it, the volume columns will simply be empty.
@@ -383,7 +384,7 @@ The five views per DC are populated from these columns:
 | №1 Object and size | `SIZE_MB` in the sizes file |
 | №2 Report → tables | `Таблицы источники данных`; plus `View`, `Mat.view`, `Временные таблицы` — so that those objects do **not** end up in №2 |
 | №3 Report → routines | `Функции/процедуры` in the reports file |
-| №4 Report → executions | `Кол-во обращений` in the reports file |
+| №4 Report → executions | `Кол-во обращений` in the separate statistics file |
 | №5 Report → retention | `Глубина хранения` in the sizes file |
 
 If the file has no separate `View`, `Mat.view` and `Временные таблицы` columns,

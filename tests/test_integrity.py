@@ -146,6 +146,10 @@ def test_real_headers_from_customer_file_resolve():
     """Фактические заголовки файла отчётов сопоставляются без правок конфига.
 
     «Наименование отчета» пишется без «ё» — сопоставление это учитывает.
+    Файл несёт «Ср. дл. (сек)» и «Кол-во обращений» физически (старый формат
+    выгрузки), но `reports.columns` эти поля больше не знает — статистика
+    приходит только из отдельного файла, и `resolve_columns` не находит их
+    здесь ни при каких обстоятельствах.
     """
     headers = [
         "№", "ТС", "Завод", "Каталог 1-го уровня", "Каталог 2-го уровня",
@@ -162,8 +166,8 @@ def test_real_headers_from_customer_file_resolve():
     assert resolved["report_name"] == "Наименование отчета"
     assert resolved["uses_view"] == "Используется view"
     assert resolved["source_tables"] == "Таблицы источники данных"
-    assert resolved["avg_duration_sec"] == "Ср. дл. (сек)"
-    assert resolved["exec_count"] == "Кол-во обращений"
+    assert "avg_duration_sec" not in resolved
+    assert "exec_count" not in resolved
 
 
 def test_segment_export_headers_resolve():
@@ -459,8 +463,22 @@ def test_segment_type_column_present_is_not_flagged(full_db, paths):
     assert stats.segments_without_type == 0
 
 
-def test_usage_comes_from_main_file(full_db):
-    """Частота и длительность приходят из основного файла, без отдельного."""
+def test_usage_ignored_without_a_separate_file(bare_db):
+    """Кол-во обращений и длительность из основного файла больше не читаются.
+
+    sample_reports.xlsx физически несёт эти колонки (сохранено ради других
+    проверок и потому, что заказчик показал именно такую форму основного
+    файла), но раз отдельный файл статистики не подключён, fact_report_usage
+    обязана остаться пустой — единственный источник теперь report_usage.
+    """
+    filled = bare_db.execute(
+        "SELECT COUNT(*) FROM fact_report_usage WHERE exec_count IS NOT NULL"
+    ).fetchone()[0]
+    assert filled == 0
+
+
+def test_usage_comes_only_from_the_separate_file(full_db):
+    """Со включённым отдельным файлом статистика есть."""
     filled = full_db.execute(
         "SELECT COUNT(*) FROM fact_report_usage WHERE exec_count IS NOT NULL"
     ).fetchone()[0]
@@ -530,6 +548,69 @@ def test_usage_file_matches_by_network_and_plant_without_catalog_path(tmp_path_f
     assert got == {"Завод-А": 10, "Завод-Б": 20}, (
         "обращения должны попасть на СВОЙ завод, а не перепутаться между ними"
     )
+
+
+def test_report_sql_text_is_broadcast_by_name(tmp_path_factory):
+    """Текст SQL-запроса применяется ко всем отчётам с этим именем.
+
+    В отличие от статистики использования, файл SQL-запросов не несёт ТС и
+    Завод — запрос описывает определение отчёта, а не конкретную площадку.
+    Поэтому один и тот же отчёт на нескольких заводах обязан получить один и
+    тот же текст, а не остаться пустым из-за «неоднозначного» имени.
+    """
+    import pandas as pd
+
+    reports = pd.DataFrame(
+        [
+            {"№": 1, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T1"},
+            {"№": 2, "ТС": "СЕТЬ-1", "Завод": "Завод-Б",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T2"},
+            {"№": 3, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Наименование отчета": "Свой отчёт",
+             "Таблицы источники данных": "dbo.T3"},
+        ]
+    )
+    sql = pd.DataFrame(
+        [
+            {"Наименование отчета": "Общий отчёт",
+             "Запрос к базе данных": "SELECT 1 FROM dual"},
+            {"Наименование отчета": "Отчёт без пары",
+             "Запрос к базе данных": "SELECT 2 FROM dual"},
+        ]
+    )
+    src_dir = tmp_path_factory.mktemp("sql_text")
+    reports_path = src_dir / "reports.xlsx"
+    sql_path = src_dir / "sql.xlsx"
+    reports.to_excel(reports_path, index=False)
+    sql.to_excel(sql_path, index=False)
+
+    base = load_mapping()
+    mapping = Mapping(
+        reports=base.reports,
+        table_sizes=SectionConfig(),
+        report_usage=SectionConfig(),
+        report_sql=base.report_sql,
+    )
+    mapping.report_sql.file = str(sql_path)
+    db = tmp_path_factory.mktemp("sql_text_db") / "db.duckdb"
+    stats = build(reports_path, db, mapping)
+
+    assert stats.sql_loaded == 2, "текст обязан лечь на оба завода «Общего отчёта»"
+    assert stats.sql_unmatched == ["Отчёт без пары"]
+
+    con = duckdb.connect(str(db), read_only=True)
+    rows = con.execute(
+        "SELECT report_name, plant, sql_text FROM dim_report ORDER BY report_id"
+    ).fetchall()
+    con.close()
+    assert rows == [
+        ("Общий отчёт", "Завод-А", "SELECT 1 FROM dual"),
+        ("Общий отчёт", "Завод-Б", "SELECT 1 FROM dual"),
+        ("Свой отчёт", "Завод-А", None),
+    ]
 
 
 def test_duration_is_seconds_not_milliseconds(full_db):
@@ -703,8 +784,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 12.
-    expected = "ad95a6"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 13.
+    expected = "adcdad"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -1628,15 +1709,19 @@ def test_footprint_survives_without_size_file(bare_db):
     assert rows[0] == rows[1] > 0
 
 
-def test_quadrants_use_usage_from_main_file(bare_db):
-    """Статистика лежит в основном файле, поэтому квадранты считаются и без
-    отдельного файла статистики."""
+def test_quadrants_are_empty_without_a_separate_usage_file(bare_db):
+    """Без отдельного файла статистики квадранты не считаются вовсе.
+
+    Статистика больше не читается из основного файла ни при каких условиях —
+    у каждого отчёта exec_count NULL, и v_report_cost_value обязана отвечать
+    об этом честно, а не подсовывать квадрант, посчитанный на пустом месте.
+    """
     quadrants = {
         row[0] for row in bare_db.execute(
             "SELECT DISTINCT quadrant FROM v_report_cost_value"
         ).fetchall()
     }
-    assert quadrants - {"Нет данных об использовании"}
+    assert quadrants == {"Нет данных об использовании"}
 
 
 # --- Экспорт HTML ---------------------------------------------------------

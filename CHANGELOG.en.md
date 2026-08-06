@@ -37,6 +37,21 @@ file records only what a user can see.
 - The demo data now contains "network-wide" reports — one name across different
   networks and on several plants of a network. Without that overlap the new page
   would show 100% unique on the demo database and check nothing.
+- **A report's SQL query text** — a new optional file for the "SQL queries" role
+  on the "Load data" page: report name and query text, with no ТС or Завод.
+  Shown on its own tab of the report card. Matching is by name only, and the
+  text found is applied to every report sharing that name — the same report on
+  several plants gets the same query.
+
+### Changed
+
+- **Usage statistics (executions, duration) are read only from a separate
+  file.** They used to be taken straight from the main reports file, with the
+  separate file as an optional override; now the main file never reads those
+  columns, even where they physically exist — the only source of statistics is
+  the "Statistics as a separate file" role. Anyone who was not already loading
+  such a file separately will need to start doing so after the update, or the
+  execution and duration figures will stay empty.
 
 ### Fixed
 
