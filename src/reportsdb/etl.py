@@ -675,6 +675,15 @@ def _load_report_usage(
         for rid, n, p, net, pl in rows_db
     }
     by_path = {(_low(p), _low(n)): rid for rid, n, p, _, _ in rows_db}
+    # Файл статистики часто несёт ТС и Завод, но не единую колонку «Каталог» —
+    # заказчик выгружает их отдельно, а собирать путь из уровней каталога здесь
+    # незачем: ТС+Завод+имя обычно уже однозначны. Без этого уровня совпадение
+    # проверялось бы либо по полному пути (которого в файле нет), либо сразу по
+    # одному имени без завода — а одно и то же имя отчёта заведено на разных
+    # заводах постоянно, и строки статистики тихо терялись бы как неоднозначные.
+    by_net_plant: dict[tuple[str, str, str], list[int]] = {}
+    for rid, n, _, net, pl in rows_db:
+        by_net_plant.setdefault((_low(net), _low(pl), _low(n)), []).append(rid)
     by_name: dict[str, list[int]] = {}
     for rid, name, _, _, _ in rows_db:
         by_name.setdefault(_low(name), []).append(rid)
@@ -696,9 +705,13 @@ def _load_report_usage(
             report_id = by_full.get((_low(network), _low(plant), _low(path), _low(name)))
             if report_id is None:
                 report_id = by_path.get((_low(path), _low(name)))
+        if report_id is None and network is not None and plant is not None:
+            candidates = by_net_plant.get((_low(network), _low(plant), _low(name)), [])
+            # Неоднозначно и внутри одного завода — сопоставлять нельзя.
+            report_id = candidates[0] if len(candidates) == 1 else None
         if report_id is None:
             candidates = by_name.get(_low(name), [])
-            # Неоднозначное имя без пути сопоставлять нельзя — данные ушли бы не туда.
+            # Неоднозначное имя без завода сопоставлять нельзя — данные ушли бы не туда.
             report_id = candidates[0] if len(candidates) == 1 else None
         if report_id is None:
             stats.usage_unmatched.append(name)

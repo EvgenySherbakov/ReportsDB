@@ -467,6 +467,71 @@ def test_usage_comes_from_main_file(full_db):
     assert filled > 0
 
 
+def test_usage_file_matches_by_network_and_plant_without_catalog_path(tmp_path_factory):
+    """Файл статистики с ТС и Заводом, но без колонки «Каталог», не теряет строки.
+
+    Заказчик выгружает статистику отдельным файлом с колонками ТС/Завод/
+    Наименование отчёта — без единого столбца «Каталог» (в основном файле путь
+    приходит тремя уровнями, которые сопоставление статистики не собирает).
+    Один и тот же отчёт при этом заведён на нескольких заводах одной ТС — так
+    сопоставление по одному имени становится неоднозначным и раньше просто
+    отбрасывало такие строки в usage_unmatched, даже когда ТС и Завод в файле
+    указаны прямо и годятся, чтобы разрешить неоднозначность.
+    """
+    import pandas as pd
+
+    reports = pd.DataFrame(
+        [
+            {"№": 1, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T1;dbo.T2"},
+            {"№": 2, "ТС": "СЕТЬ-1", "Завод": "Завод-Б",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T3;dbo.T4"},
+        ]
+    )
+    usage = pd.DataFrame(
+        [
+            {"ТС": "СЕТЬ-1", "Завод": "Завод-А", "Наименование отчета": "Общий отчёт",
+             "Кол-во обращений": 10},
+            {"ТС": "СЕТЬ-1", "Завод": "Завод-Б", "Наименование отчета": "Общий отчёт",
+             "Кол-во обращений": 20},
+        ]
+    )
+    src_dir = tmp_path_factory.mktemp("usage_by_plant")
+    reports_path = src_dir / "reports.xlsx"
+    usage_path = src_dir / "usage.xlsx"
+    reports.to_excel(reports_path, index=False)
+    usage.to_excel(usage_path, index=False)
+
+    base = load_mapping()
+    mapping = Mapping(
+        reports=base.reports,
+        table_sizes=SectionConfig(),
+        report_usage=base.report_usage,
+    )
+    mapping.report_usage.file = str(usage_path)
+    db = tmp_path_factory.mktemp("usage_by_plant_db") / "db.duckdb"
+    stats = build(reports_path, db, mapping)
+
+    assert stats.usage_unmatched == [], (
+        "статистика с ТС+Заводом, но без «Каталога», не должна теряться из-за "
+        "неоднозначного имени отчёта"
+    )
+
+    con = duckdb.connect(str(db), read_only=True)
+    got = dict(
+        con.execute(
+            "SELECT r.plant, u.exec_count FROM dim_report r "
+            "JOIN fact_report_usage u ON u.report_id = r.report_id"
+        ).fetchall()
+    )
+    con.close()
+    assert got == {"Завод-А": 10, "Завод-Б": 20}, (
+        "обращения должны попасть на СВОЙ завод, а не перепутаться между ними"
+    )
+
+
 def test_duration_is_seconds_not_milliseconds(full_db):
     """Длительность хранится в секундах — как в исходном файле."""
     worst = full_db.execute(

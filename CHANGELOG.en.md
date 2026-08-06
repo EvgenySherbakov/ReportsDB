@@ -49,6 +49,14 @@ file records only what a user can see.
   currently busy" warning asking to wait and refresh, and "Load data" stays
   fully usable — a file can be picked and loaded without waiting for someone
   else to release the database.
+- **A standalone usage-statistics file silently lost rows** when it had ТС
+  (network) and Завод (plant) columns but no single "Каталог" (catalog path)
+  column — the usual shape of that export, since the main file carries the path
+  as three separate levels. Matching a report used to check either the full
+  path (absent from such a file) or the name alone without a plant — and the
+  same report name is commonly reused across plants, so those rows were simply
+  dropped as ambiguous. Matching now tries "network + plant + name" first — it
+  is almost always unambiguous and needs no "Каталог" column in the usage file.
 
 ## [1.5.0] — 2026-08-06
 
