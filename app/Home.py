@@ -34,6 +34,7 @@ NAV = {
         st.Page("views/cost.py", title="Объём и стоимость", icon="💾"),
         st.Page("views/candidates.py", title="Кандидаты на вывод", icon="🧹"),
         st.Page("views/report_overlap.py", title="Похожие отчёты", icon="🧩"),
+        st.Page("views/plant_unique.py", title="Уникальные отчёты завода", icon="🏷️"),
         st.Page("views/abc.py", title="ABC-анализ", icon="📈"),
     ],
     "Справочники": [

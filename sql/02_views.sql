@@ -618,3 +618,120 @@ LEFT JOIN agg   a ON a.report_id = r.report_id
 LEFT JOIN other o ON o.report_id = r.report_id
 LEFT JOIN fact_report_usage u ON u.report_id = r.report_id
 ORDER BY tables_total_mb DESC;
+
+
+-- =========================================================================
+-- 7. Двойник отчёта на другом заводе своей ТС
+-- См. docs/TZ.md, раздел 5.8.
+-- =========================================================================
+-- Зеркало v_report_overlap. Там пары ищутся ВНУТРИ одного завода, потому что
+-- один и тот же отчёт на разных площадках — норма, а не дубль. Здесь эта же
+-- норма и есть предмет вопроса: заказчику нужно знать, что на заводе есть
+-- своего, чего нет у соседей по ТС.
+--
+-- Витрина отдаёт ФАКТЫ, а не приговор «уникален»: тёзки на других заводах и
+-- ближайший по набору таблиц отчёт с величиной сходства. Порог, за которым
+-- сходство считается «тот же отчёт», задаёт читатель — на странице это
+-- ползунок. Зашить порог в витрину значило бы иметь две разные правды об
+-- уникальности: одну в SQL, другую на странице.
+--
+-- Сравнение только с ДРУГИМИ заводами СВОЕЙ ТС: сети — разные хозяйства, и
+-- совпадение отчёта между ними ничего не говорит о том, что завод ведёт сам.
+-- COALESCE, а не сравнение напрямую: NULL = NULL в SQL неверно, и отчёты без
+-- заполненной сети или завода выпали бы из сравнения совсем.
+CREATE VIEW v_report_plant_twin AS
+WITH tbl AS (
+    -- Только настоящие таблицы — как везде, где речь о наборе таблиц отчёта.
+    SELECT b.report_id, b.table_id
+    FROM bridge_report_table b
+    JOIN dim_table t ON t.table_id = b.table_id
+    WHERE t.object_kind = 'TABLE'
+),
+cnt AS (
+    SELECT report_id, COUNT(*) AS n FROM tbl GROUP BY report_id
+),
+pairs AS (
+    -- Порог «не меньше 2 общих таблиц» — тот же, что в v_report_overlap:
+    -- одна общая таблица означает общий справочник вроде календаря, а не тот
+    -- же отчёт, и таких пар на реальных данных десятки тысяч.
+    SELECT a.report_id, b.report_id AS twin_id, COUNT(*) AS shared
+    FROM tbl a
+    JOIN tbl b         ON b.table_id = a.table_id AND b.report_id <> a.report_id
+    JOIN dim_report ra ON ra.report_id = a.report_id
+    JOIN dim_report rb ON rb.report_id = b.report_id
+    WHERE COALESCE(ra.network, '') = COALESCE(rb.network, '')
+      AND COALESCE(ra.plant, '')  <> COALESCE(rb.plant, '')
+    GROUP BY 1, 2
+    HAVING COUNT(*) >= 2
+),
+scored AS (
+    SELECT p.report_id, p.twin_id, p.shared,
+           ROUND(p.shared::DOUBLE / (ca.n + cb.n - p.shared), 3) AS jaccard
+    FROM pairs p
+    JOIN cnt ca ON ca.report_id = p.report_id
+    JOIN cnt cb ON cb.report_id = p.twin_id
+),
+best AS (
+    -- Ближайший двойник: наибольшее сходство, при равенстве — больше общих
+    -- таблиц. Ровно один на отчёт, иначе строки размножились бы по числу
+    -- похожих отчётов и суммы на странице поехали бы.
+    SELECT report_id, twin_id, shared, jaccard
+    FROM (
+        SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY report_id ORDER BY jaccard DESC, shared DESC, twin_id
+        ) AS rn
+        FROM scored
+    )
+    WHERE rn = 1
+),
+name_twin AS (
+    -- Тёзка на другом заводе своей ТС. Сравнение по LOWER(TRIM(...)): регистр
+    -- и краевые пробелы в выгрузке разъезжаются, а отчёт это один и тот же.
+    SELECT a.report_id,
+           COUNT(*)                                              AS name_twin_count,
+           string_agg(DISTINCT COALESCE(b.plant, '(не указан)'), '; ') AS name_twin_plants
+    FROM dim_report a
+    JOIN dim_report b
+      ON LOWER(TRIM(b.report_name)) = LOWER(TRIM(a.report_name))
+     AND COALESCE(b.network, '') = COALESCE(a.network, '')
+     AND COALESCE(b.plant, '')  <> COALESCE(a.plant, '')
+    GROUP BY a.report_id
+),
+scope AS (
+    -- С чем вообще сравнивать: сколько заводов с отчётами есть в этой ТС.
+    -- Один — сравнивать не с чем, и об этом обязана сказать страница, иначе
+    -- «все отчёты уникальны» читается как вывод, а не как отсутствие данных.
+    SELECT COALESCE(network, '') AS net_key,
+           COUNT(DISTINCT COALESCE(plant, '(не указан)')) AS plants_in_network
+    FROM dim_report
+    GROUP BY 1
+)
+SELECT
+    s.report_id,
+    s.report_no,
+    s.report_name,
+    s.network,
+    s.plant,
+    s.catalog_path,
+    s.uses_view,
+    s.table_count,
+    s.sized_table_count,
+    s.tables_total_mb,
+    s.tables_exclusive_mb,
+    s.table_names,
+    s.exec_count,
+    s.avg_duration_sec,
+    s.total_duration_sec,
+    sc.plants_in_network - 1              AS plants_compared,
+    COALESCE(nt.name_twin_count, 0)       AS name_twin_count,
+    nt.name_twin_plants,
+    b.jaccard                             AS best_jaccard,
+    b.shared                              AS best_shared_tables,
+    rb.report_name                        AS best_twin_report,
+    rb.plant                              AS best_twin_plant,
+    rb.report_id                          AS best_twin_report_id
+FROM v_report_tables_summary s
+JOIN scope sc          ON sc.net_key = COALESCE(s.network, '')
+LEFT JOIN name_twin nt ON nt.report_id = s.report_id
+LEFT JOIN best b       ON b.report_id = s.report_id
+LEFT JOIN dim_report rb ON rb.report_id = b.twin_id;

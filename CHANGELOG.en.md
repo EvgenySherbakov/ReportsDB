@@ -11,6 +11,23 @@ file records only what a user can see.
 
 ## [Unreleased]
 
+### Added
+
+- **A plant's unique reports** — a new page in the "Reports" section, the other
+  side of "Similar reports". It shows how much of its own a plant runs: a report
+  is unique when the other plants of its own trade network (ТС) have neither a
+  namesake nor a close twin by table set. A per-plant summary of "reports total /
+  unique / share / volume of their tables / executions", a stack of "unique and
+  present at the neighbours", and a similarity threshold slider. Clicking a
+  report shows its tables with size, row count and retention depth, its
+  executions, average duration and why the report counts as unique: the closest
+  report on another plant is named together with the similarity value. A plant
+  with no neighbours in its network is named outright — there "every report is
+  unique" only means there was nothing to compare with.
+- The `v_report_plant_twin` view — available on the "SQL query" page: a report's
+  namesakes on other plants of its own network and the closest twin by table set
+  with the similarity.
+
 ## [1.5.0] — 2026-08-06
 
 Working with lists. The search accepts several values at once, the found tables

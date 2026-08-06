@@ -127,6 +127,7 @@ are visible from any SQL client and usable without Streamlit.
 | `v_decommission_candidates` | What can be retired and how much it frees |
 | `v_catalog_overview`, `v_schema_overview` | Summary by folders and schemas |
 | `v_report_overlap` | Reports **of one plant** with an almost identical set of sources (`TABLE` only; the "Similar reports" page uses its own query with the same principle and a threshold slider) |
+| `v_report_plant_twin` | A report's twin on **another plant of its own network**: namesakes and the closest match by table set, with the similarity. The view holds no uniqueness threshold — the reader sets it with a slider on the page |
 | `v_tables_catalog`, `v_rc_report_tables`, `v_rc_report_routines`, `v_rc_report_usage`, `v_rc_report_retention` | The five core views per DC. №1 is exactly the contents of the sizes file: the list of database tables comes from there and nowhere else |
 | `v_report_table_size` | The size of a table for a specific report: takes the measurement of that report's plant. Reports and sizes are joined through it |
 | `v_report_tables_summary` | A report, its tables on one line, and their total size |
@@ -164,6 +165,7 @@ Sections are nested, so the `pages/` folder does not fit — pages live in
 | Reports | `cost.py` | Which tables a report refers to and how much they weigh |
 | Reports | `candidates.py` | The decommission list with a confidence level |
 | Reports | `report_overlap.py` | Similar reports of one plant: shared and differing tables |
+| Reports | `plant_unique.py` | A plant's unique reports: what the neighbours in its network do not have, with their tables, volume and executions |
 | Reports | `abc.py` | ABC analysis: where the load is concentrated for the chosen measure |
 | References | `tables.py` | All source objects: criticality, kind, dependencies |
 | References | `networks.py` | Plant comparison: database volume, share under reports |

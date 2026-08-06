@@ -42,6 +42,7 @@ VIEWS = [
     "v_network_overview",
     "v_report_duration",
     "v_report_overlap",
+    "v_report_plant_twin",
     "v_tables_catalog",
     "v_report_table_size",
     "v_rc_report_tables",
@@ -635,8 +636,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 10.
-    expected = "8e5711"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 11.
+    expected = "c5f87f"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -687,6 +688,168 @@ def test_export_overlap_query_stays_inside_one_plant(full_db):
     mixed = [(a, b) for a, b in zip(rows["id1"], rows["id2"])
              if plants[a] != plants[b]]
     assert not mixed, f"в выгрузку попали пары отчётов с разных заводов: {len(mixed)}"
+
+
+# --- Уникальные отчёты завода ---------------------------------------------
+
+def test_plant_twin_keeps_one_row_per_report(full_db):
+    """Витрина двойников — строка на отчёт, а не на пару.
+
+    Похожих отчётов у одного бывает несколько; если строки размножатся по их
+    числу, суммы объёма и запусков на странице вырастут на пустом месте.
+    """
+    reports = full_db.execute("SELECT COUNT(*) FROM dim_report").fetchone()[0]
+    rows = full_db.execute("SELECT COUNT(*) FROM v_report_plant_twin").fetchone()[0]
+    assert rows == reports
+
+
+def test_plant_twin_looks_only_at_other_plants_of_one_network(full_db):
+    """Двойник ищется на ДРУГОМ заводе, но внутри своей ТС.
+
+    Зеркальное правило к «Похожим отчётам»: там пара обязана быть внутри
+    одного завода, здесь — обязана быть между разными заводами одной сети.
+    Сети ведут хозяйство независимо, и совпадение отчёта между ними ничего не
+    говорит о том, что завод делает сам.
+    """
+    bad = full_db.execute(
+        """
+        SELECT COUNT(*) FROM v_report_plant_twin v
+        JOIN dim_report t ON t.report_id = v.best_twin_report_id
+        JOIN dim_report r ON r.report_id = v.report_id
+        WHERE COALESCE(t.network, '') <> COALESCE(r.network, '')
+           OR COALESCE(t.plant, '')    = COALESCE(r.plant, '')
+        """
+    ).fetchone()[0]
+    assert bad == 0, "двойник найден на своём заводе или в чужой ТС"
+
+
+def _twin_db(tmp_path_factory):
+    """Крошечная база с нарочно устроенными двойниками.
+
+    На демо-данных наименования отчётов уникальны по построению, а сходство
+    наборов таблиц не доходит до 0.3 — правила проверить нечем. Здесь каждый
+    случай заведён вручную.
+    """
+    import pandas as pd
+
+    rows = [
+        # Тёзки в одной ТС: наборы таблиц разные, совпадает только имя —
+        # и регистром с краевым пробелом, как в живой выгрузке.
+        ("СЕТЬ-1", "Завод-А", "Отчёт-тёзка", "dbo.T1;dbo.T2;dbo.T3"),
+        ("СЕТЬ-1", "Завод-Б", " отчёт-тёзка ", "dbo.T7;dbo.T8;dbo.T9"),
+        # Разные имена, но набор таблиц совпадает полностью.
+        ("СЕТЬ-1", "Завод-А", "Отчёт-копия-А", "dbo.T4;dbo.T5;dbo.T6"),
+        ("СЕТЬ-1", "Завод-Б", "Отчёт-копия-Б", "dbo.T4;dbo.T5;dbo.T6"),
+        # Своё и только своё.
+        ("СЕТЬ-1", "Завод-А", "Отчёт-свой", "dbo.T10;dbo.T11"),
+        # Одна общая таблица с «Отчёт-тёзка» завода А — это общий справочник,
+        # а не тот же отчёт: порог «не меньше двух общих» обязан её отбросить.
+        ("СЕТЬ-1", "Завод-Б", "Отчёт-со-справочником", "dbo.T1;dbo.T12"),
+        # Полный двойник первого отчёта, но в ДРУГОЙ ТС — не в счёт.
+        ("СЕТЬ-2", "Завод-В", "Отчёт-тёзка", "dbo.T1;dbo.T2;dbo.T3"),
+    ]
+    frame = pd.DataFrame(
+        [
+            {
+                "№": i + 1,
+                "ТС": network,
+                "Завод": plant,
+                "Каталог 1-го уровня": "Проверка",
+                "Наименование отчета": name,
+                "Таблицы источники данных": tables,
+            }
+            for i, (network, plant, name, tables) in enumerate(rows)
+        ]
+    )
+    source = tmp_path_factory.mktemp("twin") / "twin_reports.xlsx"
+    frame.to_excel(source, index=False)
+
+    base = load_mapping()
+    mapping = Mapping(
+        reports=base.reports,
+        table_sizes=SectionConfig(),
+        report_usage=SectionConfig(),
+    )
+    db = tmp_path_factory.mktemp("twindb") / "twin.duckdb"
+    build(source, db, mapping)
+    return duckdb.connect(str(db), read_only=True)
+
+
+@pytest.fixture(scope="module")
+def twin_db(tmp_path_factory):
+    con = _twin_db(tmp_path_factory)
+    yield con
+    con.close()
+
+
+def test_plant_twin_catches_namesakes_across_plants(twin_db):
+    """Тёзка на другом заводе своей ТС — отчёт не уникален.
+
+    Сравнение по LOWER(TRIM(...)): регистр и краевые пробелы в выгрузке
+    разъезжаются, а отчёт при этом один и тот же.
+    """
+    rows = twin_db.execute(
+        "SELECT plant, name_twin_count, name_twin_plants FROM v_report_plant_twin "
+        "WHERE LOWER(TRIM(report_name)) = 'отчёт-тёзка' AND network = 'СЕТЬ-1' "
+        "ORDER BY plant"
+    ).df()
+    assert len(rows) == 2
+    assert list(rows["name_twin_count"]) == [1, 1]
+    assert rows.loc[0, "name_twin_plants"] == "Завод-Б"
+    assert rows.loc[1, "name_twin_plants"] == "Завод-А"
+
+
+def test_plant_twin_namesake_in_another_network_does_not_count(twin_db):
+    """Тот же отчёт в другой ТС уникальности не отменяет.
+
+    У отчёта из СЕТЬ-2 и имя, и набор таблиц совпадают с отчётом СЕТЬ-1 —
+    и он всё равно обязан остаться уникальным для своего завода.
+    """
+    row = twin_db.execute(
+        "SELECT name_twin_count, best_jaccard, plants_compared "
+        "FROM v_report_plant_twin WHERE network = 'СЕТЬ-2'"
+    ).fetchone()
+    assert row[0] == 0, "тёзка найден в чужой ТС"
+    assert row[1] is None, "двойник по таблицам найден в чужой ТС"
+    assert row[2] == 0, "в СЕТЬ-2 один завод — сравнивать не с чем"
+
+
+def test_plant_twin_finds_identical_table_sets(twin_db):
+    """Полное совпадение набора таблиц — сходство 1.0 и двойник назван."""
+    rows = twin_db.execute(
+        "SELECT plant, best_jaccard, best_shared_tables, best_twin_report, "
+        "best_twin_plant FROM v_report_plant_twin "
+        "WHERE report_name LIKE 'Отчёт-копия%' ORDER BY plant"
+    ).df()
+    assert len(rows) == 2
+    assert list(rows["best_jaccard"]) == [1.0, 1.0]
+    assert list(rows["best_shared_tables"]) == [3, 3]
+    assert list(rows["best_twin_plant"]) == ["Завод-Б", "Завод-А"]
+    assert list(rows["best_twin_report"]) == ["Отчёт-копия-Б", "Отчёт-копия-А"]
+
+
+def test_plant_twin_ignores_a_single_shared_table(twin_db):
+    """Одна общая таблица — общий справочник, а не двойник.
+
+    Без порога «не меньше двух общих» любой отчёт, читающий календарь, терял
+    бы уникальность, и страница показывала бы нули там, где своего много.
+    """
+    row = twin_db.execute(
+        "SELECT best_jaccard, name_twin_count, plants_compared "
+        "FROM v_report_plant_twin WHERE report_name = 'Отчёт-со-справочником'"
+    ).fetchone()
+    assert row[0] is None, "пара на одной общей таблице просочилась в двойники"
+    assert row[1] == 0
+    assert row[2] == 1, "в СЕТЬ-1 есть второй завод — сравнивать было с чем"
+
+
+def test_plant_twin_leaves_own_reports_unique(twin_db):
+    """Отчёт без тёзки и без похожего набора таблиц остаётся уникальным."""
+    row = twin_db.execute(
+        "SELECT name_twin_count, best_jaccard, table_count "
+        "FROM v_report_plant_twin WHERE report_name = 'Отчёт-свой'"
+    ).fetchone()
+    assert row == (0, None, 2)
 
 
 def test_every_source_row_accounted_for(full_db):
