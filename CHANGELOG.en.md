@@ -11,6 +11,12 @@ file records only what a user can see.
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-08-06
+
+Working with lists. The search accepts several values at once, the found tables
+show all of their reports, and the result is taken away as a ready Excel
+workbook. Loaded data can be erased from the interface.
+
 ### Added
 
 - **Clearing the database** on the "Load data" page: a collapsed block with a
@@ -123,5 +129,6 @@ data.
 - No history is kept — every load replaces the previous one.
 - One plant cannot be added to an existing database; only a full rebuild.
 
-[Unreleased]: https://github.com/EvgenySherbakov/ReportsDB/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/EvgenySherbakov/ReportsDB/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/EvgenySherbakov/ReportsDB/compare/v1.0.0...v1.5.0
 [1.0.0]: https://github.com/EvgenySherbakov/ReportsDB/releases/tag/v1.0.0
