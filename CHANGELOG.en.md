@@ -38,6 +38,18 @@ file records only what a user can see.
   networks and on several plants of a network. Without that overlap the new page
   would show 100% unique on the demo database and check nothing.
 
+### Fixed
+
+- **The app crashed with a full-screen error** when the database was opened
+  while another process held it — for example, a load or a clear running in a
+  neighbouring tab. DuckDB does not allow opening the same file for reading and
+  for writing at once: such an attempt failed with an unhandled error and broke
+  the whole page, including "Load data", which by design is supposed to be the
+  recovery path for any failure. Now a busy database shows a "The database is
+  currently busy" warning asking to wait and refresh, and "Load data" stays
+  fully usable — a file can be picked and loaded without waiting for someone
+  else to release the database.
+
 ## [1.5.0] — 2026-08-06
 
 Working with lists. The search accepts several values at once, the found tables

@@ -190,6 +190,34 @@ def db_schema_version(con: duckdb.DuckDBPyConnection) -> int:
     return int(row[0]) if row and row[0] is not None else 0
 
 
+def try_read_only_connect(path: Path) -> duckdb.DuckDBPyConnection | None:
+    """Пробует открыть базу на чтение. `None` — файл сейчас занят.
+
+    DuckDB требует одинаковой конфигурации у всех подключений к файлу: пока в
+    другой вкладке или процессе идёт пересборка (`build`) или очистка
+    (`clear`) — там открыто подключение на запись, — открыть базу даже на
+    чтение нельзя, и вызов падает `duckdb.Error`. Это временное состояние
+    базы, а не её повреждение, поэтому решение — ждать, промолчать или
+    показать предупреждение — остаётся за вызывающим кодом, а не завершается
+    трассировкой на весь экран.
+
+    Несколько попыток с короткой паузой — под короткие гонки (пересборка
+    сейчас выполняет один быстрый SQL-запрос), не под длинную пересборку
+    целиком: та не завершится за доли секунды, и в этом случае функция
+    честно вернёт `None`.
+    """
+    import time
+
+    for attempt in range(3):
+        try:
+            return duckdb.connect(str(path), read_only=True)
+        except duckdb.Error:
+            if attempt == 2:
+                return None
+            time.sleep(0.3 * (attempt + 1))
+    return None
+
+
 @st.cache_resource
 def connect() -> duckdb.DuckDBPyConnection:
     if not DB_PATH.exists():
@@ -199,7 +227,14 @@ def connect() -> duckdb.DuckDBPyConnection:
             "командой `python -m reportsdb build data/raw/<файл>.xlsx`."
         )
         st.stop()
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = try_read_only_connect(DB_PATH)
+    if con is None:
+        st.error(
+            "**База сейчас занята другим процессом** — похоже, в другой "
+            "вкладке или окне идёт загрузка либо очистка данных.\n\n"
+            "Подождите, пока она закончится, и обновите страницу (F5)."
+        )
+        st.stop()
     _OPEN_CONNECTIONS.append(con)
 
     # База, собранная прежней версией кода, не содержит новых колонок витрин.

@@ -11,11 +11,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import duckdb
 import pandas as pd
 import streamlit as st
 
-from _shared import DB_PATH, db_schema_version, page_setup, release_db
+from _shared import (
+    DB_PATH,
+    db_schema_version,
+    page_setup,
+    release_db,
+    try_read_only_connect,
+)
 
 from reportsdb.config import RAW_DIR, SCHEMA_VERSION, load_mapping, resolve_columns
 from reportsdb.etl import build
@@ -135,53 +140,62 @@ if not DB_PATH.exists():
     st.info("База ещё не собрана. Загрузите файл с отчётами — это займёт секунды.")
 else:
     # Эта страница — путь восстановления, поэтому она обязана открываться на
-    # ЛЮБОЙ базе, включая собранную прежней версией. Отсюда мягкие запросы:
-    # ни один сбой чтения не должен помешать нажать «Загрузить».
+    # ЛЮБОЙ базе, включая собранную прежней версией, и даже когда файл сейчас
+    # занят другим процессом. Отсюда мягкие запросы: ни один сбой чтения не
+    # должен помешать нажать «Загрузить» ниже.
     run = counts = None
     version = 0
-    probe = duckdb.connect(str(DB_PATH), read_only=True)
-    try:
-        version = db_schema_version(probe)
+    probe = try_read_only_connect(DB_PATH)
+    if probe is None:
+        st.info(
+            "**База сейчас занята** — похоже, в другой вкладке или окне идёт "
+            "загрузка или очистка данных. Показатели ниже временно не видны, "
+            "но это не мешает загрузке — она подождёт своей очереди.",
+            icon="⏳",
+        )
+    else:
         try:
-            run = probe.execute(
-                "SELECT started_at, source_file, rows_loaded, rows_rejected FROM etl_run "
-                "ORDER BY run_id DESC LIMIT 1"
-            ).fetchone()
-            counts = probe.execute(
-                """
-                SELECT (SELECT COUNT(*) FROM dim_report),
-                       (SELECT COUNT(*) FROM dim_table),
-                       (SELECT COUNT(*) FROM fact_table_size),
-                       (SELECT COUNT(*) FROM fact_report_usage WHERE exec_count IS NOT NULL),
-                       (SELECT COUNT(*) FROM dim_report WHERE uses_view),
-                       (SELECT COUNT(DISTINCT network) FROM dim_report WHERE network IS NOT NULL)
-                """
-            ).fetchone()
-        except Exception:  # noqa: BLE001 — структура старая, показать нечего
-            pass
-    finally:
-        probe.close()
+            version = db_schema_version(probe)
+            try:
+                run = probe.execute(
+                    "SELECT started_at, source_file, rows_loaded, rows_rejected FROM etl_run "
+                    "ORDER BY run_id DESC LIMIT 1"
+                ).fetchone()
+                counts = probe.execute(
+                    """
+                    SELECT (SELECT COUNT(*) FROM dim_report),
+                           (SELECT COUNT(*) FROM dim_table),
+                           (SELECT COUNT(*) FROM fact_table_size),
+                           (SELECT COUNT(*) FROM fact_report_usage WHERE exec_count IS NOT NULL),
+                           (SELECT COUNT(*) FROM dim_report WHERE uses_view),
+                           (SELECT COUNT(DISTINCT network) FROM dim_report WHERE network IS NOT NULL)
+                    """
+                ).fetchone()
+            except Exception:  # noqa: BLE001 — структура старая, показать нечего
+                pass
+        finally:
+            probe.close()
 
-    if version < SCHEMA_VERSION:
-        st.warning(
-            f"База собрана прежней версией программы (структура {version} "
-            f"вместо {SCHEMA_VERSION}). Разделы аналитики пока не откроются — "
-            "нажмите «Загрузить» ниже, и всё заработает."
-        )
-    elif counts:
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("Отчётов", counts[0])
-        c2.metric("Таблиц", counts[1])
-        c3.metric("С размерами", counts[2])
-        c4.metric("Со статистикой", counts[3])
-        c5.metric("Через view", counts[4])
-        c6.metric("Торговых сетей", counts[5])
+        if version < SCHEMA_VERSION:
+            st.warning(
+                f"База собрана прежней версией программы (структура {version} "
+                f"вместо {SCHEMA_VERSION}). Разделы аналитики пока не откроются — "
+                "нажмите «Загрузить» ниже, и всё заработает."
+            )
+        elif counts:
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
+            c1.metric("Отчётов", counts[0])
+            c2.metric("Таблиц", counts[1])
+            c3.metric("С размерами", counts[2])
+            c4.metric("Со статистикой", counts[3])
+            c5.metric("Через view", counts[4])
+            c6.metric("Торговых сетей", counts[5])
 
-    if run:
-        st.caption(
-            f"Последняя загрузка: {run[0]:%Y-%m-%d %H:%M} из `{run[1]}` — "
-            f"загружено {run[2]}, отброшено {run[3]}."
-        )
+        if run:
+            st.caption(
+                f"Последняя загрузка: {run[0]:%Y-%m-%d %H:%M} из `{run[1]}` — "
+                f"загружено {run[2]}, отброшено {run[3]}."
+            )
 
 # --- Очистка базы ------------------------------------------------------------
 # Блок стоит здесь, а не внизу страницы: ниже есть st.stop() на случай пустой
@@ -539,32 +553,41 @@ if st.button("Загрузить", type="primary", use_container_width=True):
             f"с каталогом. Например: {', '.join(stats.usage_unmatched[:5])}"
         )
 
-    con = duckdb.connect(str(DB_PATH), read_only=True)
-    try:
-        rejects = con.execute(
-            "SELECT source_row, reason, payload FROM etl_reject"
-        ).df()
-        rejects.columns = ["Строка файла", "Причина", "Данные строки"]
-        filled = con.execute(
-            """
-            SELECT COUNT(*) FILTER (WHERE network IS NOT NULL),
-                   COUNT(*) FILTER (WHERE uses_view IS NOT NULL),
-                   COUNT(*) FILTER (WHERE folder_l2 IS NOT NULL),
-                   (SELECT COUNT(*) FROM fact_report_usage WHERE avg_duration_sec IS NOT NULL)
-            FROM dim_report
-            """
-        ).fetchone()
-    finally:
-        con.close()
+    con = try_read_only_connect(DB_PATH)
+    if con is None:
+        # Загрузка уже прошла успешно (сообщение «Готово» выше) — сбой здесь
+        # означает только то, что подробности сейчас недоступны, а не то, что
+        # с только что собранной базой что-то не так.
+        st.caption(
+            "База сейчас занята другим процессом — заполненность колонок и "
+            "отброшенные строки временно не показать."
+        )
+    else:
+        try:
+            rejects = con.execute(
+                "SELECT source_row, reason, payload FROM etl_reject"
+            ).df()
+            rejects.columns = ["Строка файла", "Причина", "Данные строки"]
+            filled = con.execute(
+                """
+                SELECT COUNT(*) FILTER (WHERE network IS NOT NULL),
+                       COUNT(*) FILTER (WHERE uses_view IS NOT NULL),
+                       COUNT(*) FILTER (WHERE folder_l2 IS NOT NULL),
+                       (SELECT COUNT(*) FROM fact_report_usage WHERE avg_duration_sec IS NOT NULL)
+                FROM dim_report
+                """
+            ).fetchone()
+        finally:
+            con.close()
 
-    st.caption(
-        f"Заполнено: ТС — {filled[0]}, признак view — {filled[1]}, "
-        f"второй уровень каталога — {filled[2]}, длительность — {filled[3]}."
-    )
+        st.caption(
+            f"Заполнено: ТС — {filled[0]}, признак view — {filled[1]}, "
+            f"второй уровень каталога — {filled[2]}, длительность — {filled[3]}."
+        )
 
-    if not rejects.empty:
-        with st.expander(f"Отброшенные строки ({len(rejects)})"):
-            st.dataframe(rejects, use_container_width=True, hide_index=True)
+        if not rejects.empty:
+            with st.expander(f"Отброшенные строки ({len(rejects)})"):
+                st.dataframe(rejects, use_container_width=True, hide_index=True)
 
     st.info("Данные обновлены — переходите к разделам аналитики в меню слева.")
     st.caption(
