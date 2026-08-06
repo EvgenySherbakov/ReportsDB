@@ -13,20 +13,30 @@ file records only what a user can see.
 
 ### Added
 
-- **A plant's unique reports** — a new page in the "Reports" section, the other
-  side of "Similar reports". It shows how much of its own a plant runs: a report
-  is unique when the other plants of its own trade network (ТС) have neither a
-  namesake nor a close twin by table set. A per-plant summary of "reports total /
-  unique / share / volume of their tables / executions", a stack of "unique and
-  present at the neighbours", and a similarity threshold slider. Clicking a
-  report shows its tables with size, row count and retention depth, its
-  executions, average duration and why the report counts as unique: the closest
-  report on another plant is named together with the similarity value. A plant
-  with no neighbours in its network is named outright — there "every report is
-  unique" only means there was nothing to compare with.
-- The `v_report_plant_twin` view — available on the "SQL query" page: a report's
-  namesakes on other plants of its own network and the closest twin by table set
-  with the similarity.
+- **Unique reports** — a new page in the "Reports" section, the other side of
+  "Similar reports": it shows what is a network's or a plant's own. A report is
+  unique when the other side has neither a namesake nor a close twin by table
+  set. **The comparison scope is a switch:**
+  - *between networks* — what other trade networks (ТС) do not have. The unit of
+    counting is a network's report: one standing on several of its plants counts
+    once;
+  - *between plants of one network* — what the neighbours do not have. The unit
+    of counting is a report record on a plant.
+
+  A summary of "reports total / unique / share / volume of their tables /
+  executions", a stack of "unique and present on the other side", and a
+  similarity threshold slider. Clicking a report shows its tables with size and
+  retention depth, its executions, average duration and why the report counts as
+  unique: the closest report on the other side is named together with the
+  similarity value. A network or plant with nothing to compare against is named
+  outright — there "every report is unique" only means there was nothing to
+  compare with.
+- The `v_report_twin` and `v_network_report_twin` views — available on the
+  "SQL query" page: a report's namesakes and closest twins for both comparison
+  scopes, and a network's report as a whole with its plants on one line.
+- The demo data now contains "network-wide" reports — one name across different
+  networks and on several plants of a network. Without that overlap the new page
+  would show 100% unique on the demo database and check nothing.
 
 ## [1.5.0] — 2026-08-06
 

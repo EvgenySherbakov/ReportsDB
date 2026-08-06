@@ -134,6 +134,49 @@ def generate(seed: int = 42, report_count: int = 120) -> dict[str, Path]:
             }
         )
 
+    # «Сетевые» отчёты: одно и то же наименование заведено в разных ТС и на
+    # нескольких заводах внутри одной сети. Без такого пересечения демо-данные
+    # не показывают ни межсетевой разницы, ни внутрисетевых дублей — то есть
+    # ровно того, для чего сделана страница уникальных отчётов: у заказчика
+    # сети пересекаются по отчётам примерно на 70%.
+    #
+    # Часть копий чуть расходится по набору таблиц (одна таблица заменена) —
+    # так проверяется порог сходства: полное совпадение и «почти то же самое»
+    # должны вести себя одинаково, а расхождение вдвое — уже нет.
+    shared_core = rnd.sample(all_tables, 20)
+    for index, subject in enumerate(REPORT_SUBJECT):
+        name = f"Сетевой {subject}"
+        base_tables = rnd.sample(shared_core, 5)
+        l1, l2, l3 = FOLDER_LEVELS[index % len(FOLDER_LEVELS)]
+        # Последние два наименования есть не во всех сетях — иначе в каждой ТС
+        # «своего» не остаётся вовсе и разница между сетями всегда нулевая.
+        networks = NETWORKS if index < len(REPORT_SUBJECT) - 2 else NETWORKS[:1]
+        for network_name in networks:
+            plants = [p for p, net in PLANT_NETWORK.items() if net == network_name]
+            for plant_index, plant_name in enumerate(plants):
+                picked = list(base_tables)
+                if (index + plant_index) % 3 == 0:
+                    picked[-1] = rnd.choice([t for t in tail if t not in picked])
+                rows.append(
+                    {
+                        "№": len(rows) + 1,
+                        "ТС": network_name,
+                        "Завод": plant_name,
+                        "Каталог 1-го уровня": l1,
+                        "Каталог 2-го уровня": l2,
+                        "Каталог 3-го уровня": l3,
+                        "Наименование отчета": name,
+                        "Используется view": "нет",
+                        "Таблицы источники данных": ";".join(picked),
+                        "View": "",
+                        "Mat.view": "",
+                        "Временные таблицы": "",
+                        "Функции/процедуры": "",
+                        "Ср. дл. (сек)": round(rnd.lognormvariate(1.6, 1.2), 1),
+                        "Кол-во обращений": int(rnd.lognormvariate(3.2, 1.5)),
+                    }
+                )
+
     # Пара проблемных строк — проверка отбраковки.
     n = len(rows)
     blank = {k: "" for k in rows[0]}

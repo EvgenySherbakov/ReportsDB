@@ -621,26 +621,40 @@ ORDER BY tables_total_mb DESC;
 
 
 -- =========================================================================
--- 7. Двойник отчёта на другом заводе своей ТС
+-- 7. Двойники отчёта: в других ТС и на других заводах своей ТС
 -- См. docs/TZ.md, раздел 5.8.
 -- =========================================================================
 -- Зеркало v_report_overlap. Там пары ищутся ВНУТРИ одного завода, потому что
--- один и тот же отчёт на разных площадках — норма, а не дубль. Здесь эта же
--- норма и есть предмет вопроса: заказчику нужно знать, что на заводе есть
--- своего, чего нет у соседей по ТС.
+-- один и тот же отчёт на нескольких площадках — норма, а не дубль. Здесь эта
+-- норма и есть предмет вопроса: что у сети (или у завода) есть своё, чего нет
+-- у остальных.
 --
--- Витрина отдаёт ФАКТЫ, а не приговор «уникален»: тёзки на других заводах и
--- ближайший по набору таблиц отчёт с величиной сходства. Порог, за которым
--- сходство считается «тот же отчёт», задаёт читатель — на странице это
--- ползунок. Зашить порог в витрину значило бы иметь две разные правды об
--- уникальности: одну в SQL, другую на странице.
+-- Областей сравнения две, и обе нужны — какая интереснее, зависит от данных.
+-- На данных заказчика сети пересекаются по отчётам примерно на 70%, и главный
+-- вопрос — чем они РАЗЛИЧАЮТСЯ; внутри одной сети уникальных отчётов по
+-- заводам заметно меньше. Поэтому область не зашита, а стоит в колонке
+-- `scope`, и страница выбирает нужную:
 --
--- Сравнение только с ДРУГИМИ заводами СВОЕЙ ТС: сети — разные хозяйства, и
--- совпадение отчёта между ними ничего не говорит о том, что завод ведёт сам.
+--   'NETWORK' — сравнение с отчётами ДРУГИХ ТС (любой их завод);
+--   'PLANT'   — сравнение с другими заводами СВОЕЙ ТС.
+--
+-- Строка на «отчёт × область»: витрина отдаёт ФАКТЫ, а не приговор
+-- «уникален». Тёзки и ближайший по набору таблиц отчёт с величиной сходства
+-- есть, а порог, за которым сходство означает «тот же отчёт», задаёт читатель —
+-- на странице это ползунок. Зашить порог в витрину значило бы иметь две разные
+-- правды об уникальности: одну в SQL, другую на странице.
+--
 -- COALESCE, а не сравнение напрямую: NULL = NULL в SQL неверно, и отчёты без
 -- заполненной сети или завода выпали бы из сравнения совсем.
-CREATE VIEW v_report_plant_twin AS
-WITH tbl AS (
+CREATE VIEW v_report_twin AS
+WITH rc AS (
+    SELECT report_id,
+           COALESCE(network, '(не указана)') AS net,
+           COALESCE(plant,   '(не указан)')  AS plt,
+           LOWER(TRIM(report_name))          AS name_key
+    FROM dim_report
+),
+tbl AS (
     -- Только настоящие таблицы — как везде, где речь о наборе таблиц отчёта.
     SELECT b.report_id, b.table_id
     FROM bridge_report_table b
@@ -650,61 +664,78 @@ WITH tbl AS (
 cnt AS (
     SELECT report_id, COUNT(*) AS n FROM tbl GROUP BY report_id
 ),
+scopes AS (
+    SELECT 'NETWORK' AS scope UNION ALL SELECT 'PLANT'
+),
 pairs AS (
-    -- Порог «не меньше 2 общих таблиц» — тот же, что в v_report_overlap:
-    -- одна общая таблица означает общий справочник вроде календаря, а не тот
-    -- же отчёт, и таких пар на реальных данных десятки тысяч.
-    SELECT a.report_id, b.report_id AS twin_id, COUNT(*) AS shared
+    -- Порог «не меньше 2 общих таблиц» — тот же, что в v_report_overlap: одна
+    -- общая таблица означает общий справочник вроде календаря, а не тот же
+    -- отчёт, и таких пар на реальных данных десятки тысяч.
+    SELECT a.report_id AS id1, b.report_id AS id2, COUNT(*) AS shared
     FROM tbl a
-    JOIN tbl b         ON b.table_id = a.table_id AND b.report_id <> a.report_id
-    JOIN dim_report ra ON ra.report_id = a.report_id
-    JOIN dim_report rb ON rb.report_id = b.report_id
-    WHERE COALESCE(ra.network, '') = COALESCE(rb.network, '')
-      AND COALESCE(ra.plant, '')  <> COALESCE(rb.plant, '')
+    JOIN tbl b ON b.table_id = a.table_id AND b.report_id <> a.report_id
     GROUP BY 1, 2
     HAVING COUNT(*) >= 2
 ),
 scored AS (
-    SELECT p.report_id, p.twin_id, p.shared,
-           ROUND(p.shared::DOUBLE / (ca.n + cb.n - p.shared), 3) AS jaccard
+    SELECT
+        p.id1 AS report_id,
+        p.id2 AS twin_id,
+        p.shared,
+        ROUND(p.shared::DOUBLE / (c1.n + c2.n - p.shared), 3) AS jaccard,
+        CASE WHEN ra.net = rb.net THEN 'PLANT' ELSE 'NETWORK' END AS scope
     FROM pairs p
-    JOIN cnt ca ON ca.report_id = p.report_id
-    JOIN cnt cb ON cb.report_id = p.twin_id
+    JOIN cnt c1 ON c1.report_id = p.id1
+    JOIN cnt c2 ON c2.report_id = p.id2
+    JOIN rc ra  ON ra.report_id = p.id1
+    JOIN rc rb  ON rb.report_id = p.id2
+    -- Пара обязана быть между разными РЦ: внутри одного завода похожие отчёты
+    -- ищет v_report_overlap, и смешивать эти два вопроса нельзя.
+    WHERE NOT (ra.net = rb.net AND ra.plt = rb.plt)
 ),
 best AS (
-    -- Ближайший двойник: наибольшее сходство, при равенстве — больше общих
-    -- таблиц. Ровно один на отчёт, иначе строки размножились бы по числу
-    -- похожих отчётов и суммы на странице поехали бы.
-    SELECT report_id, twin_id, shared, jaccard
+    -- Ближайший двойник в своей области: наибольшее сходство, при равенстве —
+    -- больше общих таблиц. Ровно один на «отчёт × область», иначе строки
+    -- размножились бы по числу похожих отчётов и суммы на странице поехали бы.
+    SELECT report_id, scope, twin_id, shared, jaccard
     FROM (
         SELECT *, ROW_NUMBER() OVER (
-            PARTITION BY report_id ORDER BY jaccard DESC, shared DESC, twin_id
+            PARTITION BY report_id, scope
+            ORDER BY jaccard DESC, shared DESC, twin_id
         ) AS rn
         FROM scored
     )
     WHERE rn = 1
 ),
-name_twin AS (
-    -- Тёзка на другом заводе своей ТС. Сравнение по LOWER(TRIM(...)): регистр
-    -- и краевые пробелы в выгрузке разъезжаются, а отчёт это один и тот же.
-    SELECT a.report_id,
-           COUNT(*)                                              AS name_twin_count,
-           string_agg(DISTINCT COALESCE(b.plant, '(не указан)'), '; ') AS name_twin_plants
-    FROM dim_report a
-    JOIN dim_report b
-      ON LOWER(TRIM(b.report_name)) = LOWER(TRIM(a.report_name))
-     AND COALESCE(b.network, '') = COALESCE(a.network, '')
-     AND COALESCE(b.plant, '')  <> COALESCE(a.plant, '')
-    GROUP BY a.report_id
+name_pairs AS (
+    -- Тёзка: сравнение по LOWER(TRIM(...)) — регистр и краевые пробелы в
+    -- выгрузке разъезжаются, а отчёт при этом один и тот же.
+    SELECT ra.report_id,
+           CASE WHEN ra.net = rb.net THEN 'PLANT' ELSE 'NETWORK' END AS scope,
+           rb.net, rb.plt
+    FROM rc ra
+    JOIN rc rb ON rb.name_key = ra.name_key
+    WHERE NOT (ra.net = rb.net AND ra.plt = rb.plt)
 ),
-scope AS (
-    -- С чем вообще сравнивать: сколько заводов с отчётами есть в этой ТС.
-    -- Один — сравнивать не с чем, и об этом обязана сказать страница, иначе
-    -- «все отчёты уникальны» читается как вывод, а не как отсутствие данных.
-    SELECT COALESCE(network, '') AS net_key,
-           COUNT(DISTINCT COALESCE(plant, '(не указан)')) AS plants_in_network
-    FROM dim_report
-    GROUP BY 1
+name_twin AS (
+    SELECT
+        report_id,
+        scope,
+        -- Считается то же, что перечисляется: в области ТС — сети, в области
+        -- заводов — заводы. Иначе число и список рядом противоречили бы друг
+        -- другу.
+        COUNT(DISTINCT CASE WHEN scope = 'PLANT' THEN plt ELSE net END) AS name_twin_count,
+        string_agg(DISTINCT CASE WHEN scope = 'PLANT' THEN plt ELSE net END, '; '
+                   ORDER BY CASE WHEN scope = 'PLANT' THEN plt ELSE net END)
+            AS name_twin_where
+    FROM name_pairs
+    GROUP BY report_id, scope
+),
+plants_in_net AS (
+    SELECT net, COUNT(DISTINCT plt) AS n FROM rc GROUP BY net
+),
+networks_total AS (
+    SELECT COUNT(DISTINCT net) AS n FROM rc
 )
 SELECT
     s.report_id,
@@ -722,16 +753,119 @@ SELECT
     s.exec_count,
     s.avg_duration_sec,
     s.total_duration_sec,
-    sc.plants_in_network - 1              AS plants_compared,
-    COALESCE(nt.name_twin_count, 0)       AS name_twin_count,
-    nt.name_twin_plants,
-    b.jaccard                             AS best_jaccard,
-    b.shared                              AS best_shared_tables,
-    rb.report_name                        AS best_twin_report,
-    rb.plant                              AS best_twin_plant,
-    rb.report_id                          AS best_twin_report_id
+    sc.scope,
+    -- С чем вообще было что сравнивать. Ноль означает, что сравнивать не с чем,
+    -- и «отчёт уникален» тогда не вывод, а отсутствие данных — страница обязана
+    -- сказать это прямо.
+    CASE WHEN sc.scope = 'PLANT' THEN pin.n - 1 ELSE nt_all.n - 1 END
+        AS counterparts_compared,
+    COALESCE(nt.name_twin_count, 0) AS name_twin_count,
+    nt.name_twin_where,
+    b.jaccard AS best_jaccard,
+    b.shared  AS best_shared_tables,
+    rb.report_name AS best_twin_report,
+    rbc.net        AS best_twin_network,
+    rbc.plt        AS best_twin_plant,
+    CASE WHEN sc.scope = 'PLANT' THEN rbc.plt ELSE rbc.net END AS best_twin_where,
+    b.twin_id AS best_twin_report_id
 FROM v_report_tables_summary s
-JOIN scope sc          ON sc.net_key = COALESCE(s.network, '')
-LEFT JOIN name_twin nt ON nt.report_id = s.report_id
-LEFT JOIN best b       ON b.report_id = s.report_id
-LEFT JOIN dim_report rb ON rb.report_id = b.twin_id;
+CROSS JOIN scopes sc
+JOIN rc r0             ON r0.report_id = s.report_id
+JOIN plants_in_net pin ON pin.net = r0.net
+CROSS JOIN networks_total nt_all
+LEFT JOIN name_twin nt ON nt.report_id = s.report_id AND nt.scope = sc.scope
+LEFT JOIN best b       ON b.report_id  = s.report_id AND b.scope  = sc.scope
+LEFT JOIN dim_report rb ON rb.report_id = b.twin_id
+LEFT JOIN rc rbc        ON rbc.report_id = b.twin_id;
+
+
+-- 7.1. Отчёт сети целиком: строка на «ТС + наименование» -------------------
+-- Для вопроса «чем различаются сети» единица счёта — отчёт сети, а не запись
+-- по заводу: отчёт, стоящий на трёх заводах одной ТС, — это один отчёт этой
+-- сети, и считать его трижды значило бы завысить «своё» втрое.
+--
+-- Двойник в других ТС берётся по худшему для уникальности случаю: если хотя бы
+-- одна площадка отчёта нашла себе двойника в другой сети, значит отчёт в других
+-- сетях есть. Порога уникальности здесь тоже нет — он остаётся за читателем.
+CREATE VIEW v_network_report_twin AS
+WITH rows AS (
+    SELECT * FROM v_report_twin WHERE scope = 'NETWORK'
+),
+keys AS (
+    SELECT DISTINCT
+           COALESCE(network, '(не указана)') AS network,
+           LOWER(TRIM(report_name))          AS name_key
+    FROM dim_report
+),
+name_twin AS (
+    SELECT a.network, a.name_key,
+           COUNT(DISTINCT b.network)              AS name_twin_count,
+           string_agg(DISTINCT b.network, '; ' ORDER BY b.network) AS name_twin_networks
+    FROM keys a
+    JOIN keys b ON b.name_key = a.name_key AND b.network <> a.network
+    GROUP BY a.network, a.name_key
+),
+tables AS (
+    -- Таблиц у отчёта сети — объединение по её заводам, а не сумма по записям:
+    -- одна и та же таблица на трёх заводах остаётся одной таблицей.
+    SELECT COALESCE(r.network, '(не указана)') AS network,
+           LOWER(TRIM(r.report_name))         AS name_key,
+           COUNT(DISTINCT b.table_id)         AS table_count
+    FROM dim_report r
+    JOIN bridge_report_table b ON b.report_id = r.report_id
+    JOIN dim_table t           ON t.table_id = b.table_id AND t.object_kind = 'TABLE'
+    GROUP BY 1, 2
+),
+agg AS (
+    SELECT
+        COALESCE(network, '(не указана)')          AS network,
+        LOWER(TRIM(report_name))                   AS name_key,
+        MIN(report_name)                           AS report_name,
+        COUNT(*)                                   AS plant_count,
+        string_agg(DISTINCT COALESCE(plant, '(не указан)'), '; '
+                   ORDER BY COALESCE(plant, '(не указан)'))       AS plants,
+        -- Объём и запуски складываются по заводам сети: на каждом заводе отчёт
+        -- читает свои таблицы и запускается своё число раз.
+        ROUND(SUM(tables_total_mb), 2)             AS tables_total_mb,
+        SUM(exec_count)                            AS exec_count,
+        MAX(counterparts_compared)                 AS networks_compared,
+        MAX(best_jaccard)                          AS best_jaccard
+    FROM rows
+    GROUP BY 1, 2
+),
+best AS (
+    SELECT network, name_key, best_twin_report, best_twin_network,
+           best_shared_tables, best_jaccard
+    FROM (
+        SELECT COALESCE(network, '(не указана)') AS network,
+               LOWER(TRIM(report_name))         AS name_key,
+               best_twin_report, best_twin_network, best_shared_tables, best_jaccard,
+               ROW_NUMBER() OVER (
+                   PARTITION BY COALESCE(network, '(не указана)'),
+                                LOWER(TRIM(report_name))
+                   ORDER BY best_jaccard DESC NULLS LAST, best_shared_tables DESC
+               ) AS rn
+        FROM rows
+    )
+    WHERE rn = 1
+)
+SELECT
+    a.network,
+    a.name_key,
+    a.report_name,
+    a.plant_count,
+    a.plants,
+    COALESCE(t.table_count, 0) AS table_count,
+    a.tables_total_mb,
+    a.exec_count,
+    a.networks_compared,
+    COALESCE(nt.name_twin_count, 0) AS name_twin_count,
+    nt.name_twin_networks,
+    a.best_jaccard,
+    b.best_shared_tables,
+    b.best_twin_report,
+    b.best_twin_network
+FROM agg a
+LEFT JOIN tables t    ON t.network = a.network AND t.name_key = a.name_key
+LEFT JOIN name_twin nt ON nt.network = a.network AND nt.name_key = a.name_key
+LEFT JOIN best b       ON b.network = a.network AND b.name_key = a.name_key;

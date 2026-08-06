@@ -1,8 +1,10 @@
 -- Схема БД отчётности SSRS. См. docs/TZ.md, раздел 4.
 -- Скрипт выполняется на чистой БД (ETL пересоздаёт файл), но написан идемпотентно.
 
--- Первым — зависящий от v_report_tables_summary, иначе его нельзя удалить.
-DROP VIEW IF EXISTS v_report_plant_twin;
+-- Первыми — зависящие от других витрин, иначе их нельзя удалить:
+-- v_network_report_twin читает v_report_twin, тот — v_report_tables_summary.
+DROP VIEW IF EXISTS v_network_report_twin;
+DROP VIEW IF EXISTS v_report_twin;
 DROP VIEW IF EXISTS v_tables_catalog;
 DROP VIEW IF EXISTS v_report_tables_summary;
 DROP VIEW IF EXISTS v_rc_summary;

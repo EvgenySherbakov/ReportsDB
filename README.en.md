@@ -189,7 +189,8 @@ A DC (distribution centre) is a "network + plant" pair. Menu section
 | `v_network_overview` | DC comparison: the plant's database volume, how much of it is under reports and how much is not |
 | `v_catalog_overview`, `v_schema_overview` | Distribution across catalog folders and schemas |
 | `v_report_overlap` | Reports of one plant with an almost identical set of sources |
-| `v_report_plant_twin` | A report's twin on another plant of its own network: namesakes and the closest match by table set |
+| `v_report_twin` | A report's twins: in other networks and on other plants of its own network (the `scope` column) |
+| `v_network_report_twin` | A network's report as a whole: plants collapsed, showing whether other networks have it |
 | `v_report_tables_summary` | A report, the list of its tables and their total size |
 
 ### Report card
@@ -211,24 +212,32 @@ several plants is normal design, not a duplicate: there is nothing to merge,
 and cross-plant pairs pile up so fast that real candidates disappear behind
 them.
 
-### A plant's unique reports
+### Unique reports
 
-The **"Уникальные отчёты завода"** ("A plant's unique reports", the "Reports"
-section) answers the opposite question: **how much of its own does the plant
-run**. A report is unique when the other plants of its own trade network (ТС)
-have neither a namesake nor a close twin by table set. At the top there is a
-per-plant summary: reports in total, how many of them are unique, their share,
-the volume of their tables and the number of executions. Clicking a report shows
-its tables with size and retention depth, its executions, average duration and
-**why** it counts as unique: the closest report on another plant is named
-together with the similarity value.
+The **"Уникальные отчёты"** ("Unique reports", the "Reports" section) answers the
+opposite question: **what is a network's or a plant's own**. A report is unique
+when the other side has neither a namesake nor a close twin by table set.
 
-The similarity threshold is a slider: "the same report" on different plants
-drifts apart by table set over time, and where "the same" ends is for the reader
-to decide. Only plants of one network are compared — networks run their business
-independently. If a network holds a single plant, the page says so outright:
-there is nothing to compare with, and "every report is unique" there means a
-lack of data rather than a conclusion.
+**The comparison scope is a switch**, because there are two questions:
+
+- **Between networks** — what other trade networks (ТС) do not have. Networks
+  overlap by a large share of their reports (roughly 70% on the customer's data),
+  and the differences between them are the main thing to see. The unit of counting
+  here is a network's report: one standing on several of its plants counts once.
+- **Between plants of one network** — what the neighbours do not have. The unit
+  of counting is a report record on a plant.
+
+At the top there is a summary: reports in total, how many of them are unique,
+their share, the volume of their tables and the number of executions. Clicking a
+report shows its tables with size and retention depth, its executions, average
+duration and **why** it counts as unique: the closest report on the other side is
+named together with the similarity value.
+
+The similarity threshold is a slider: "the same report" on different sites drifts
+apart by table set over time, and where "the same" ends is for the reader to
+decide. When there is nothing to compare with (a single network in the database,
+or a single plant in the network), the page says so outright: "every report is
+unique" there means a lack of data rather than a conclusion.
 
 ### ABC analysis
 

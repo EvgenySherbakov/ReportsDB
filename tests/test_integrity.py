@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import duckdb
+import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +43,8 @@ VIEWS = [
     "v_network_overview",
     "v_report_duration",
     "v_report_overlap",
-    "v_report_plant_twin",
+    "v_report_twin",
+    "v_network_report_twin",
     "v_tables_catalog",
     "v_report_table_size",
     "v_rc_report_tables",
@@ -636,8 +638,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 11.
-    expected = "c5f87f"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 12.
+    expected = "ad95a6"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -690,45 +692,101 @@ def test_export_overlap_query_stays_inside_one_plant(full_db):
     assert not mixed, f"в выгрузку попали пары отчётов с разных заводов: {len(mixed)}"
 
 
-# --- Уникальные отчёты завода ---------------------------------------------
+# --- Уникальные отчёты: двойники в других ТС и на других заводах -----------
 
-def test_plant_twin_keeps_one_row_per_report(full_db):
-    """Витрина двойников — строка на отчёт, а не на пару.
+def test_report_twin_keeps_one_row_per_report_and_scope(full_db):
+    """Витрина двойников — строка на «отчёт × область», а не на пару.
 
     Похожих отчётов у одного бывает несколько; если строки размножатся по их
     числу, суммы объёма и запусков на странице вырастут на пустом месте.
     """
     reports = full_db.execute("SELECT COUNT(*) FROM dim_report").fetchone()[0]
-    rows = full_db.execute("SELECT COUNT(*) FROM v_report_plant_twin").fetchone()[0]
-    assert rows == reports
+    rows = full_db.execute("SELECT COUNT(*) FROM v_report_twin").fetchone()[0]
+    scopes = full_db.execute(
+        "SELECT COUNT(DISTINCT scope) FROM v_report_twin"
+    ).fetchone()[0]
+    assert scopes == 2, "областей сравнения ровно две: NETWORK и PLANT"
+    assert rows == reports * 2
 
 
-def test_plant_twin_looks_only_at_other_plants_of_one_network(full_db):
-    """Двойник ищется на ДРУГОМ заводе, но внутри своей ТС.
+def test_report_twin_scope_plant_stays_inside_one_network(full_db):
+    """Область PLANT: двойник на другом заводе, но внутри своей ТС."""
+    bad = full_db.execute(
+        """
+        SELECT COUNT(*) FROM v_report_twin v
+        JOIN dim_report t ON t.report_id = v.best_twin_report_id
+        JOIN dim_report r ON r.report_id = v.report_id
+        WHERE v.scope = 'PLANT'
+          AND (COALESCE(t.network, '') <> COALESCE(r.network, '')
+            OR COALESCE(t.plant, '')    = COALESCE(r.plant, ''))
+        """
+    ).fetchone()[0]
+    assert bad == 0, "в области PLANT двойник нашёлся в чужой ТС или на своём заводе"
 
-    Зеркальное правило к «Похожим отчётам»: там пара обязана быть внутри
-    одного завода, здесь — обязана быть между разными заводами одной сети.
-    Сети ведут хозяйство независимо, и совпадение отчёта между ними ничего не
-    говорит о том, что завод делает сам.
+
+def test_report_twin_scope_network_looks_outside_the_network(full_db):
+    """Область NETWORK: двойник обязан быть в ДРУГОЙ сети.
+
+    Это и есть вопрос заказчика: сети пересекаются по отчётам, и различия между
+    ними — то, что нужно видеть. Внутрисетевые пары сюда попадать не должны,
+    иначе «своё» у сети занижается её же вторым заводом.
     """
     bad = full_db.execute(
         """
-        SELECT COUNT(*) FROM v_report_plant_twin v
+        SELECT COUNT(*) FROM v_report_twin v
         JOIN dim_report t ON t.report_id = v.best_twin_report_id
         JOIN dim_report r ON r.report_id = v.report_id
-        WHERE COALESCE(t.network, '') <> COALESCE(r.network, '')
-           OR COALESCE(t.plant, '')    = COALESCE(r.plant, '')
+        WHERE v.scope = 'NETWORK'
+          AND COALESCE(t.network, '') = COALESCE(r.network, '')
         """
     ).fetchone()[0]
-    assert bad == 0, "двойник найден на своём заводе или в чужой ТС"
+    assert bad == 0, "в области NETWORK двойник нашёлся в своей же сети"
+
+
+def test_demo_data_has_reports_shared_between_networks(full_db):
+    """Демо-данные обязаны показывать межсетевое пересечение.
+
+    Без него страница уникальных отчётов на демо-базе всегда показывает 100%
+    уникальных, и проверить её нечем — а у заказчика сети пересекаются по
+    отчётам примерно на 70%.
+    """
+    shared = full_db.execute(
+        "SELECT COUNT(*) FROM v_network_report_twin WHERE name_twin_count > 0"
+    ).fetchone()[0]
+    twins = full_db.execute(
+        "SELECT COUNT(*) FROM v_network_report_twin WHERE best_jaccard >= 0.8"
+    ).fetchone()[0]
+    assert shared > 0, "в демо-данных нет отчётов-тёзок в разных ТС"
+    assert twins > 0, "в демо-данных нет отчётов с совпадающим набором таблиц в разных ТС"
+
+
+def test_network_report_twin_collapses_plants_of_one_network(full_db):
+    """Отчёт сети — одна строка, сколько бы заводов его ни держало.
+
+    Единица счёта для вопроса «чем различаются сети» — отчёт сети. Отчёт,
+    стоящий на трёх заводах одной ТС, — это один отчёт, и считать его трижды
+    значило бы завысить «своё» втрое.
+    """
+    rows = full_db.execute("SELECT COUNT(*) FROM v_network_report_twin").fetchone()[0]
+    groups = full_db.execute(
+        "SELECT COUNT(*) FROM (SELECT DISTINCT COALESCE(network, '(не указана)'), "
+        "LOWER(TRIM(report_name)) FROM dim_report)"
+    ).fetchone()[0]
+    assert rows == groups
+
+    # И схлопывание не потеряло заводы: у отчёта, заведённого на двух заводах
+    # одной сети, plant_count = 2.
+    multi = full_db.execute(
+        "SELECT MAX(plant_count) FROM v_network_report_twin"
+    ).fetchone()[0]
+    assert multi > 1, "в демо-данных нет отчёта, стоящего на нескольких заводах ТС"
 
 
 def _twin_db(tmp_path_factory):
     """Крошечная база с нарочно устроенными двойниками.
 
-    На демо-данных наименования отчётов уникальны по построению, а сходство
-    наборов таблиц не доходит до 0.3 — правила проверить нечем. Здесь каждый
-    случай заведён вручную.
+    Каждый случай заведён вручную: только так видно, что область сравнения
+    работает в обе стороны — межсетевую и внутрисетевую.
     """
     import pandas as pd
 
@@ -737,15 +795,16 @@ def _twin_db(tmp_path_factory):
         # и регистром с краевым пробелом, как в живой выгрузке.
         ("СЕТЬ-1", "Завод-А", "Отчёт-тёзка", "dbo.T1;dbo.T2;dbo.T3"),
         ("СЕТЬ-1", "Завод-Б", " отчёт-тёзка ", "dbo.T7;dbo.T8;dbo.T9"),
-        # Разные имена, но набор таблиц совпадает полностью.
+        # Разные имена, но набор таблиц совпадает полностью — внутри одной ТС.
         ("СЕТЬ-1", "Завод-А", "Отчёт-копия-А", "dbo.T4;dbo.T5;dbo.T6"),
         ("СЕТЬ-1", "Завод-Б", "Отчёт-копия-Б", "dbo.T4;dbo.T5;dbo.T6"),
-        # Своё и только своё.
+        # Своё и только своё — нет ни тёзки, ни похожего набора нигде.
         ("СЕТЬ-1", "Завод-А", "Отчёт-свой", "dbo.T10;dbo.T11"),
         # Одна общая таблица с «Отчёт-тёзка» завода А — это общий справочник,
         # а не тот же отчёт: порог «не меньше двух общих» обязан её отбросить.
         ("СЕТЬ-1", "Завод-Б", "Отчёт-со-справочником", "dbo.T1;dbo.T12"),
-        # Полный двойник первого отчёта, но в ДРУГОЙ ТС — не в счёт.
+        # Тёзка и полный двойник по таблицам, но в ДРУГОЙ ТС: для области
+        # NETWORK это двойник, для области PLANT — нет.
         ("СЕТЬ-2", "Завод-В", "Отчёт-тёзка", "dbo.T1;dbo.T2;dbo.T3"),
     ]
     frame = pd.DataFrame(
@@ -782,74 +841,101 @@ def twin_db(tmp_path_factory):
     con.close()
 
 
-def test_plant_twin_catches_namesakes_across_plants(twin_db):
-    """Тёзка на другом заводе своей ТС — отчёт не уникален.
+def test_twin_namesake_counts_in_its_own_scope_only(twin_db):
+    """Тёзка учитывается в той области, где он найден, и только в ней.
 
-    Сравнение по LOWER(TRIM(...)): регистр и краевые пробелы в выгрузке
-    разъезжаются, а отчёт при этом один и тот же.
+    У отчёта «Отчёт-тёзка» на Завод-А тёзка есть и на Завод-Б своей ТС, и в
+    СЕТЬ-2. Первый — область PLANT, второй — NETWORK, и путать их нельзя:
+    иначе межсетевое пересечение занижало бы «своё» у завода, и наоборот.
     """
     rows = twin_db.execute(
-        "SELECT plant, name_twin_count, name_twin_plants FROM v_report_plant_twin "
+        "SELECT scope, name_twin_count, name_twin_where FROM v_report_twin "
         "WHERE LOWER(TRIM(report_name)) = 'отчёт-тёзка' AND network = 'СЕТЬ-1' "
-        "ORDER BY plant"
+        "AND plant = 'Завод-А' ORDER BY scope"
     ).df()
-    assert len(rows) == 2
+    assert list(rows["scope"]) == ["NETWORK", "PLANT"]
     assert list(rows["name_twin_count"]) == [1, 1]
-    assert rows.loc[0, "name_twin_plants"] == "Завод-Б"
-    assert rows.loc[1, "name_twin_plants"] == "Завод-А"
+    assert rows.loc[0, "name_twin_where"] == "СЕТЬ-2"
+    assert rows.loc[1, "name_twin_where"] == "Завод-Б"
 
 
-def test_plant_twin_namesake_in_another_network_does_not_count(twin_db):
-    """Тот же отчёт в другой ТС уникальности не отменяет.
+def test_twin_in_another_network_is_invisible_to_plant_scope(twin_db):
+    """Отчёт СЕТЬ-2 уникален для своего завода, но не для своей сети.
 
-    У отчёта из СЕТЬ-2 и имя, и набор таблиц совпадают с отчётом СЕТЬ-1 —
-    и он всё равно обязан остаться уникальным для своего завода.
+    И имя, и набор таблиц совпадают с отчётом СЕТЬ-1. В области PLANT это не
+    двойник (в СЕТЬ-2 других заводов нет), а в области NETWORK — двойник.
     """
-    row = twin_db.execute(
-        "SELECT name_twin_count, best_jaccard, plants_compared "
-        "FROM v_report_plant_twin WHERE network = 'СЕТЬ-2'"
-    ).fetchone()
-    assert row[0] == 0, "тёзка найден в чужой ТС"
-    assert row[1] is None, "двойник по таблицам найден в чужой ТС"
-    assert row[2] == 0, "в СЕТЬ-2 один завод — сравнивать не с чем"
+    rows = twin_db.execute(
+        "SELECT scope, name_twin_count, best_jaccard, counterparts_compared "
+        "FROM v_report_twin WHERE network = 'СЕТЬ-2' ORDER BY scope"
+    ).df()
+    network_row, plant_row = rows.iloc[0], rows.iloc[1]
+    assert network_row["scope"] == "NETWORK"
+    assert network_row["name_twin_count"] == 1
+    assert network_row["best_jaccard"] == 1.0
+    assert network_row["counterparts_compared"] == 1, "в базе две сети"
+    assert plant_row["scope"] == "PLANT"
+    assert plant_row["name_twin_count"] == 0
+    # NULL из витрины приходит в pandas как NaN — проверять только через isna.
+    assert pd.isna(plant_row["best_jaccard"])
+    assert plant_row["counterparts_compared"] == 0, "в СЕТЬ-2 один завод"
 
 
-def test_plant_twin_finds_identical_table_sets(twin_db):
-    """Полное совпадение набора таблиц — сходство 1.0 и двойник назван."""
+def test_twin_finds_identical_table_sets_inside_a_network(twin_db):
+    """Полное совпадение набора таблиц внутри ТС — сходство 1.0 и двойник назван."""
     rows = twin_db.execute(
         "SELECT plant, best_jaccard, best_shared_tables, best_twin_report, "
-        "best_twin_plant FROM v_report_plant_twin "
-        "WHERE report_name LIKE 'Отчёт-копия%' ORDER BY plant"
+        "best_twin_where FROM v_report_twin "
+        "WHERE report_name LIKE 'Отчёт-копия%' AND scope = 'PLANT' ORDER BY plant"
     ).df()
     assert len(rows) == 2
     assert list(rows["best_jaccard"]) == [1.0, 1.0]
     assert list(rows["best_shared_tables"]) == [3, 3]
-    assert list(rows["best_twin_plant"]) == ["Завод-Б", "Завод-А"]
+    assert list(rows["best_twin_where"]) == ["Завод-Б", "Завод-А"]
     assert list(rows["best_twin_report"]) == ["Отчёт-копия-Б", "Отчёт-копия-А"]
 
 
-def test_plant_twin_ignores_a_single_shared_table(twin_db):
+def test_twin_ignores_a_single_shared_table(twin_db):
     """Одна общая таблица — общий справочник, а не двойник.
 
-    Без порога «не меньше двух общих» любой отчёт, читающий календарь, терял
-    бы уникальность, и страница показывала бы нули там, где своего много.
+    Без порога «не меньше двух общих» любой отчёт, читающий календарь, терял бы
+    уникальность, и страница показывала бы нули там, где своего много.
     """
-    row = twin_db.execute(
-        "SELECT best_jaccard, name_twin_count, plants_compared "
-        "FROM v_report_plant_twin WHERE report_name = 'Отчёт-со-справочником'"
-    ).fetchone()
-    assert row[0] is None, "пара на одной общей таблице просочилась в двойники"
-    assert row[1] == 0
-    assert row[2] == 1, "в СЕТЬ-1 есть второй завод — сравнивать было с чем"
+    rows = twin_db.execute(
+        "SELECT scope, best_jaccard, name_twin_count FROM v_report_twin "
+        "WHERE report_name = 'Отчёт-со-справочником' ORDER BY scope"
+    ).df()
+    assert list(rows["best_jaccard"].isna()) == [True, True], (
+        "пара на одной общей таблице просочилась в двойники"
+    )
+    assert list(rows["name_twin_count"]) == [0, 0]
 
 
-def test_plant_twin_leaves_own_reports_unique(twin_db):
-    """Отчёт без тёзки и без похожего набора таблиц остаётся уникальным."""
+def test_twin_leaves_own_reports_unique_in_both_scopes(twin_db):
+    """Отчёт без тёзки и без похожего набора таблиц уникален в обеих областях."""
+    rows = twin_db.execute(
+        "SELECT scope, name_twin_count, best_jaccard, table_count "
+        "FROM v_report_twin WHERE report_name = 'Отчёт-свой' ORDER BY scope"
+    ).df()
+    assert list(rows["name_twin_count"]) == [0, 0]
+    assert list(rows["best_jaccard"].isna()) == [True, True]
+    assert list(rows["table_count"]) == [2, 2]
+
+
+def test_network_report_twin_names_the_network_holding_the_twin(twin_db):
+    """У отчёта сети видно, в каких других сетях он есть."""
     row = twin_db.execute(
-        "SELECT name_twin_count, best_jaccard, table_count "
-        "FROM v_report_plant_twin WHERE report_name = 'Отчёт-свой'"
+        "SELECT plant_count, plants, table_count, name_twin_count, "
+        "name_twin_networks, best_jaccard, best_twin_network "
+        "FROM v_network_report_twin "
+        "WHERE network = 'СЕТЬ-1' AND name_key = 'отчёт-тёзка'"
     ).fetchone()
-    assert row == (0, None, 2)
+    assert row[0] == 2, "отчёт стоит на двух заводах СЕТЬ-1 — это одна строка"
+    assert row[1] == "Завод-А; Завод-Б"
+    # Объединение по заводам сети: три таблицы у одного и три у другого.
+    assert row[2] == 6
+    assert row[3] == 1 and row[4] == "СЕТЬ-2"
+    assert row[5] == 1.0 and row[6] == "СЕТЬ-2"
 
 
 def test_every_source_row_accounted_for(full_db):

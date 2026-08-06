@@ -457,39 +457,61 @@ The "at least 2 shared tables" floor is mandatory in that query too — without
 it, any two reports using a common lookup such as a calendar would become
 candidates, and on real data there can be tens of thousands of such pairs.
 
-### 5.8. `v_report_plant_twin` — a report's twin on another plant
+### 5.8. `v_report_twin` and `v_network_report_twin` — a report's twins
 
 A mirror of 5.7. There pairs are searched **inside** one plant, because the same
 report on several sites is normal design rather than a duplicate. Here that norm
-is exactly the question being asked: the customer needs to know what a plant has
-that its neighbours in the same trade network (ТС) do **not** — that is, how much
-of its own it runs.
+is the very subject of the question: what a network (or a plant) has of its own.
 
-One row per report (not per pair — otherwise the volume and execution sums would
-grow out of nothing), carrying two independent facts about twins:
+**There are two comparison scopes, and both are needed.** On the customer's data
+the trade networks (ТС) overlap by roughly 70% of their reports, and the main
+question is how they **differ**; inside one network the number of unique reports
+per plant is noticeably smaller. So the scope is not wired into the view but sits
+in the `scope` column:
 
-- `name_twin_count`, `name_twin_plants` — namesakes on other plants of the same
-  network. Compared through `LOWER(TRIM(...))`: case and edge spaces drift apart
-  in the export while the report stays the same one;
-- `best_jaccard`, `best_shared_tables`, `best_twin_report`, `best_twin_plant` —
-  the closest report by the set of **real tables** on another plant of the same
-  network, and how similar it is. `NULL` means no such report exists at all.
+| `scope` | What the report is compared against |
+| --- | --- |
+| `NETWORK` | reports of **other networks** (any of their plants) |
+| `PLANT` | other plants of **its own network** |
+
+`v_report_twin` holds one row per "report × scope", carrying two independent
+facts about twins:
+
+- `name_twin_count`, `name_twin_where` — namesakes: in the `NETWORK` scope
+  networks are counted and listed, in the `PLANT` scope plants are. Compared
+  through `LOWER(TRIM(...))`: case and edge spaces drift apart in the export
+  while the report stays the same one;
+- `best_jaccard`, `best_shared_tables`, `best_twin_report`, `best_twin_where` —
+  the closest report by the set of **real tables** on the other side, and how
+  similar it is. `NULL` means no such report exists at all.
 
 The "at least 2 shared tables" floor is the same as in 5.7: a single shared table
-means a common lookup such as a calendar, not the same report.
+means a common lookup such as a calendar, not the same report. A pair must be
+between different DCs — inside one plant similar reports are 5.7's job, and the
+two questions must not be mixed. `COALESCE` rather than a direct comparison:
+`NULL = NULL` is untrue in SQL, and reports with an empty network or plant would
+drop out of the comparison entirely.
 
-Comparison happens only against **other plants of the same network**: networks
-run their business independently, and a report matching across them says nothing
-about what the plant does on its own. `COALESCE` rather than a direct
-comparison: `NULL = NULL` is untrue in SQL, and reports with an empty network or
-plant would drop out of the comparison entirely. `plants_compared` tells whether
-there was anything to compare with at all: zero means the network holds a single
-plant, and "every report is unique" is then not a conclusion but a lack of data.
+`counterparts_compared` tells whether there was anything to compare with at all:
+zero means there are no other networks (or no other plants in this network) with
+reports, and "every report is unique" is then not a conclusion but a lack of
+data.
 
-**The view does not decide whether a report is unique.** It reports facts, and
+**`v_network_report_twin` — a network's report as a whole:** one row per
+"network + name", with plants collapsed. For the question "how do the networks
+differ" this is exactly the unit of counting: a report standing on three plants
+of one network is one report of that network, and counting it three times would
+inflate its "own" threefold. Tables are taken as the union across the network's
+plants (the same table on three plants stays one table), while volume and
+executions are summed (on each plant the report reads its own data and runs its
+own number of times). A twin in other networks is taken by the worst case for
+uniqueness: if at least one of the report's sites found a twin in another
+network, the report exists in other networks.
+
+**The views do not decide whether a report is unique.** They report facts, and
 the similarity threshold is set by the reader — on the page it is a slider.
-Wiring the threshold inside would mean two different truths about uniqueness:
-one in SQL, another on the page.
+Wiring the threshold inside would mean two different truths about uniqueness: one
+in SQL, another on the page.
 
 ---
 
@@ -701,15 +723,20 @@ Pages:
    of tables (see 5.7); the similarity threshold is a slider, and clicking a
    pair reveals the list of shared and differing tables.
 
-   4.2. **A plant's unique reports** — the other side of 4.1: reports that have
-   neither a namesake nor a close twin by table set on other plants of their own
-   network (see 5.8). It answers "how much of its own does the plant run":
-   a per-plant summary of "reports total / unique / share", a stack of "unique
-   and present at the neighbours", a similarity threshold slider, and a click on
-   a report shows its tables with volume and retention depth, its executions and
-   average duration. A plant with no neighbours in its network is named
-   outright: "every report is unique" means there was nothing to compare with,
-   not that the reports are special.
+   4.2. **Unique reports** — the other side of 4.1: reports that have neither a
+   namesake nor a close twin by table set on the other side (see 5.8). The
+   comparison scope is a switch, because there are two questions: "how do the
+   networks differ" (they overlap by roughly 70% of their reports, and the
+   differences are the main thing to see) and "what exists only on this plant"
+   inside one network. The unit of counting changes with the scope: a network's
+   report (plants collapsed) or a report record on a plant. A summary of "reports
+   total / unique / share / volume of their tables / executions", a stack of
+   "unique and present on the other side", a similarity threshold slider, and a
+   click on a report shows its tables with volume and retention depth, its
+   executions, and why the report is unique: the closest report on the other side
+   is named together with the similarity value. A network or plant with nothing to
+   compare against is named outright: "every report is unique" there means there
+   was nothing to compare with, not that the reports are special.
 
    4.3. **ABC analysis** — reports sorted by the chosen measure and cut by
    cumulative share: A up to 80%, B up to 95%, C the tail. Tiles per group, a
@@ -969,3 +996,4 @@ versions in the same commit.
 | 2026-08-02 | The contents of the Excel workbook were refined. The "Отчёты" sheet holds as many rows as there are reports, one per plant; the "Таблицы" column lists **all** of the report's tables, not only those matched by the query. The table list is taken to understand what the report consists of as a whole — a list trimmed to the query would answer a different question and mislead silently. How many of the searched tables the report actually touches remains a separate column, "Из них из запроса": that is the answer to the original question and must not be lost. The "Таблицы" sheet became a mirror of the first — as many rows as there are found tables, with the reports in one cell separated by `;`. "Table + report" pairs no longer go into the file: they are visible on screen, and two sheets carrying the same meaning in different slicing only confuse. |
 | 2026-08-06 | **Version 1.5.0 was released.** It carries everything that had accumulated in the "Unreleased" section after 1.0.0: searching by a list of values, exact name matching, all reports for the whole set of found tables together with the two-sheet Excel export, clearing the database from the interface, and `.streamlit/config.toml` inside the Docker image. The number was chosen by the customer: by semantic versioning what accumulated amounts to 1.1.0 — there are no breaking changes, the database structure stayed at `SCHEMA_VERSION = 10`, and existing databases keep working after the usual data reload — while the jump straight to 1.5.0 stands as a marker that the program has moved well beyond its first version, and it affects no compatibility. `VERSION` was raised in `pyproject.toml` and `config.py` in a single commit: it is written into `etl_run.tool_version`, and diverging values would turn that record into a lie. The "Unreleased" section was started empty, and the comparison links in the footer of both changelogs now point at `v1.5.0`. The state is marked with the `v1.5.0` tag. |
 | 2026-08-06 | **A plant's unique reports — the other side of "Similar reports".** The customer asked how much of its own a plant runs: reports the neighbours in its trade network do not have. The existing `v_report_overlap` view compares reports inside one plant only, because the same report on different sites is normal design rather than a duplicate; here that norm is the very subject of the question, so the comparison is mirrored: only between **different** plants of **one** network. Networks must not be compared with each other — they run their business independently, and a report matching across networks says nothing about what the plant does on its own. Uniqueness is checked by two independent signs: a namesake on another plant (compared via `LOWER(TRIM(...))` — case and edge spaces drift apart in the export while the report stays the same one) and the closest twin by the set of real tables with the Jaccard index. The "at least two shared tables" floor is the same as in 5.7: a single shared table means a common lookup such as a calendar. The new `v_report_plant_twin` view reports **facts, not a verdict**: namesakes, the closest twin and the similarity value, while the uniqueness threshold is set by the reader with a slider on the page — a threshold wired into SQL would create two different truths about uniqueness. The view holds one row per report rather than per pair: otherwise the volume and execution sums would grow out of nothing, and a test pins that. The plant with no neighbours in its network is named separately: `plants_compared = 0`, and "every report is unique" there means a lack of data to compare with rather than a conclusion — without that caveat the page would lie in its most confident voice. The demo data cannot exercise the rules (names there are unique by construction and similarity never reaches 0.3), so the tests build a separate tiny database where every case is set up by hand: namesakes in one network, fully identical table sets, a single shared lookup table, and a full twin in a foreign network. `SCHEMA_VERSION` was raised to 11. |
+| 2026-08-06 | **The premise of the previous entry was wrong: networks not only can be compared with each other, they must be.** The earlier decision assumed that networks run their business independently and a report matching across them means nothing, so uniqueness was computed inside one network only. The customer corrected it: the networks overlap by roughly 70% of their reports, and the main question is how they **differ**; inside one network the number of unique reports per plant is in fact noticeably smaller. The comparison scope stopped being a principle and became a choice: in the view it is the `scope` column (`NETWORK` — other networks, `PLANT` — other plants of its own network), and on the page a switch, defaulting to the cross-network view. The `v_report_plant_twin` view was renamed to `v_report_twin` (one row per "report × scope"), and `v_network_report_twin` was added next to it. The second one is needed because of the unit of counting: for the question "how do the networks differ", a report standing on three plants of one network is **one** report of that network, and counting it three times would inflate its "own" threefold; so plants are collapsed there, tables are taken as the union across plants, and volume and executions are summed. A twin in other networks is determined by the worst case for uniqueness: if at least one site found a twin, the report exists in other networks. The demo data was fixed along the way: names there were unique by construction, which made the page show 100% unique on the demo database and check nothing. "Network-wide" reports were added — one name across different networks and on several plants of a network, with some copies drifting by a single table so that the similarity threshold is visible at work. What stayed the same: only real tables are compared, the "at least two shared tables" floor holds, a pair must be between different DCs (inside one plant similar reports are `v_report_overlap`'s job), namesakes are compared through `LOWER(TRIM(...))`, and the uniqueness threshold is set by the reader rather than the view. `SCHEMA_VERSION` was raised to 12. |
