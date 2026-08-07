@@ -28,6 +28,7 @@ from .normalize import (
     full_name_key,
     match_object_kind,
     join_folders,
+    loose_key,
     normalise_catalog_path,
     parse_bool,
     parse_table_list,
@@ -83,6 +84,10 @@ class MatchReport:
     unknown_pairs: dict[str, int] = field(default_factory=dict)
     #: «ТС / Завод», которые есть в каталоге отчётов
     db_pairs: list[str] = field(default_factory=list)
+    #: пары, совпавшие только «на вид»: запись в файле → запись в каталоге
+    lookalike_pairs: dict[str, str] = field(default_factory=dict)
+    #: строк, сопоставленных по грубому ключу, — точное сравнение их развело
+    lookalike_rows: int = 0
 
     @property
     def unmatched_rows(self) -> int:
@@ -685,6 +690,109 @@ def _accumulate(entry: dict, key: str, value: float | None) -> None:
     entry[key] = value if entry[key] is None else entry[key] + value
 
 
+@dataclass
+class _ReportIndex:
+    """Каталог отчётов, разложенный по ключам сопоставления.
+
+    Ключи идут от точного к грубому, и порядок здесь — не стиль, а правило:
+    грубый ключ (`loose_key`) проверяется только после того, как точный не дал
+    результата. Он существует потому, что вспомогательные файлы выгружают
+    другие люди и другие системы: в одном файле ТС записана с кириллической
+    «Х», в другом — с латинской «X», и на экране это одна и та же надпись.
+    Точное сравнение такие строки разводит, а объяснить расхождение заказчику
+    нельзя — глазом его не видно.
+    """
+
+    by_full: dict[tuple[str, str, str, str], int] = field(default_factory=dict)
+    by_path: dict[tuple[str, str], int] = field(default_factory=dict)
+    by_net_plant: dict[tuple[str, str, str], list[int]] = field(default_factory=dict)
+    by_name: dict[str, list[int]] = field(default_factory=dict)
+    loose_full: dict[tuple[str, str, str, str], list[int]] = field(default_factory=dict)
+    loose_net_plant: dict[tuple[str, str, str], list[int]] = field(default_factory=dict)
+    loose_name: dict[str, list[int]] = field(default_factory=dict)
+    #: пары «ТС + Завод» каталога точным ключом
+    exact_pairs: set[tuple[str, str]] = field(default_factory=set)
+    #: грубый ключ пары → как эта пара записана в каталоге
+    loose_pairs: dict[tuple[str, str], str] = field(default_factory=dict)
+
+    def pair_state(self, network: str | None, plant: str | None) -> tuple[str, str]:
+        """`(«exact» | «lookalike» | «unknown» | «absent», запись в каталоге)`."""
+        if not _named_pair(network, plant):
+            return "absent", ""
+        if (_low(network), _low(plant)) in self.exact_pairs:
+            return "exact", f"{network} / {plant}"
+        catalog = self.loose_pairs.get((loose_key(network), loose_key(plant)))
+        if catalog is not None:
+            return "lookalike", catalog
+        return "unknown", ""
+
+    def find(
+        self,
+        name: str,
+        path: str | None,
+        network: str | None,
+        plant: str | None,
+        usable_pair: bool,
+    ) -> tuple[list[int], bool]:
+        """Отчёты по разрезу строки и признак «нашлось только грубым ключом»."""
+        if usable_pair and path is not None:
+            rid = self.by_full.get(
+                (_low(network), _low(plant), _low(path), _low(name))
+            )
+            if rid is not None:
+                return [rid], False
+        if usable_pair:
+            found = self.by_net_plant.get(
+                (_low(network), _low(plant), _low(name)), []
+            )
+            # Неоднозначно даже внутри одного завода — угадывать нельзя.
+            if len(found) == 1:
+                return found, False
+        if usable_pair and path is not None:
+            found = self.loose_full.get(
+                (loose_key(network), loose_key(plant), loose_key(path), loose_key(name)),
+                [],
+            )
+            if len(found) == 1:
+                return found, True
+        if usable_pair:
+            found = self.loose_net_plant.get(
+                (loose_key(network), loose_key(plant), loose_key(name)), []
+            )
+            if len(found) == 1:
+                return found, True
+        return [], False
+
+    def namesakes(self, name: str) -> tuple[list[int], bool]:
+        """Все отчёты с таким наименованием: точно, иначе — по грубому ключу."""
+        found = self.by_name.get(_low(name), [])
+        if found:
+            return found, False
+        return self.loose_name.get(loose_key(name), []), True
+
+
+def _index_reports(rows_db: list[tuple]) -> _ReportIndex:
+    index = _ReportIndex()
+    for rid, name, path, net, plant in rows_db:
+        index.by_full[(_low(net), _low(plant), _low(path), _low(name))] = rid
+        index.by_path[(_low(path), _low(name))] = rid
+        index.by_net_plant.setdefault(
+            (_low(net), _low(plant), _low(name)), []
+        ).append(rid)
+        index.by_name.setdefault(_low(name), []).append(rid)
+        index.loose_full.setdefault(
+            (loose_key(net), loose_key(plant), loose_key(path), loose_key(name)), []
+        ).append(rid)
+        index.loose_net_plant.setdefault(
+            (loose_key(net), loose_key(plant), loose_key(name)), []
+        ).append(rid)
+        index.loose_name.setdefault(loose_key(name), []).append(rid)
+        if net and plant:
+            index.exact_pairs.add((_low(net), _low(plant)))
+            index.loose_pairs[(loose_key(net), loose_key(plant))] = f"{net} / {plant}"
+    return index
+
+
 def _load_report_usage(
     con: duckdb.DuckDBPyConnection, section: SectionConfig, stats: LoadStats
 ) -> None:
@@ -700,28 +808,16 @@ def _load_report_usage(
     rows_db = con.execute(
         "SELECT report_id, report_name, catalog_path, network, plant FROM dim_report"
     ).fetchall()
-    # Ключи сопоставления от точного к грубому: чем больше совпало, тем надёжнее.
-    by_full = {
-        (_low(net), _low(pl), _low(p), _low(n)): rid
-        for rid, n, p, net, pl in rows_db
-    }
-    by_path = {(_low(p), _low(n)): rid for rid, n, p, _, _ in rows_db}
     # Файл статистики часто несёт ТС и Завод, но не единую колонку «Каталог» —
     # заказчик выгружает их отдельно, а собирать путь из уровней каталога здесь
-    # незачем: ТС+Завод+имя обычно уже однозначны. Без этого уровня совпадение
-    # проверялось бы либо по полному пути (которого в файле нет), либо сразу по
-    # одному имени без завода — а одно и то же имя отчёта заведено на разных
-    # заводах постоянно, и строки статистики тихо терялись бы как неоднозначные.
-    by_net_plant: dict[tuple[str, str, str], list[int]] = {}
-    for rid, n, _, net, pl in rows_db:
-        by_net_plant.setdefault((_low(net), _low(pl), _low(n)), []).append(rid)
-    by_name: dict[str, list[int]] = {}
-    for rid, name, _, _, _ in rows_db:
-        by_name.setdefault(_low(name), []).append(rid)
+    # незачем: ТС+Завод+имя обычно уже однозначны. Без уровня «ТС + Завод + имя»
+    # совпадение проверялось бы либо по полному пути (которого в файле нет),
+    # либо сразу по одному имени без завода — а одно и то же имя отчёта заведено
+    # на разных заводах постоянно, и строки статистики тихо терялись бы.
+    index = _index_reports(rows_db)
 
     report = stats.usage_match
     _fill_db_pairs(report, rows_db)
-    known_pairs = {(_low(net), _low(pl)) for _, _, _, net, pl in rows_db}
 
     rows: list[tuple] = []
     seen: set[int] = set()
@@ -737,24 +833,29 @@ def _load_report_usage(
         plant = clean_text(_cell(row, cols.get("plant")))
         # В отличие от текста запроса статистика привязана к площадке: раздать
         # её всем тёзкам нельзя, поэтому неизвестный разрез только отмечается.
-        has_rc = _note_pair(report, known_pairs, network, plant)
+        has_rc = _note_pair(report, index, network, plant)
 
         report_id = None
         if path is not None:
-            report_id = by_full.get((_low(network), _low(plant), _low(path), _low(name)))
+            report_id = index.by_full.get(
+                (_low(network), _low(plant), _low(path), _low(name))
+            )
             if report_id is None:
-                report_id = by_path.get((_low(path), _low(name)))
-        if report_id is None and has_rc:
-            candidates = by_net_plant.get((_low(network), _low(plant), _low(name)), [])
-            # Неоднозначно и внутри одного завода — сопоставлять нельзя.
-            report_id = candidates[0] if len(candidates) == 1 else None
+                report_id = index.by_path.get((_low(path), _low(name)))
         if report_id is None:
-            candidates = by_name.get(_low(name), [])
+            found, loosely = index.find(name, path, network, plant, has_rc)
+            if found:
+                report_id = found[0]
+                report.lookalike_rows += int(loosely)
+        if report_id is None:
+            candidates, loosely = index.namesakes(name)
             # Неоднозначное имя без завода сопоставлять нельзя — данные ушли бы не туда.
-            report_id = candidates[0] if len(candidates) == 1 else None
+            if len(candidates) == 1:
+                report_id = candidates[0]
+                report.lookalike_rows += int(loosely)
         if report_id is None:
             stats.usage_unmatched.append(name)
-            _explain_miss(report, name, by_name, has_rc, network, plant)
+            _explain_miss(report, name, index, has_rc, network, plant)
             continue
         if report_id in seen:
             continue
@@ -837,20 +938,10 @@ def _load_report_sql(
     rows_db = con.execute(
         "SELECT report_id, report_name, catalog_path, network, plant FROM dim_report"
     ).fetchall()
-    by_full = {
-        (_low(net), _low(pl), _low(p), _low(n)): rid
-        for rid, n, p, net, pl in rows_db
-    }
-    by_net_plant: dict[tuple[str, str, str], list[int]] = {}
-    for rid, n, _, net, pl in rows_db:
-        by_net_plant.setdefault((_low(net), _low(pl), _low(n)), []).append(rid)
-    by_name: dict[str, list[int]] = {}
-    for rid, name, _, _, _ in rows_db:
-        by_name.setdefault(_low(name), []).append(rid)
+    index = _index_reports(rows_db)
 
     report = stats.sql_match
     _fill_db_pairs(report, rows_db)
-    known_pairs = {(_low(net), _low(pl)) for _, _, _, net, pl in rows_db}
 
     updates: dict[int, str] = {}
     for _, row in df.iterrows():
@@ -868,31 +959,23 @@ def _load_report_sql(
         network = clean_text(_cell(row, cols.get("network")))
         plant = clean_text(_cell(row, cols.get("plant")))
         # Разрез строки — только когда обе ячейки заполнены И такая пара есть
-        # в каталоге отчётов. Пара, которой в каталоге нет, ничем не лучше
-        # пустой ячейки: искать по ней нечего, зато сказать о ней надо.
-        has_rc = _note_pair(report, known_pairs, network, plant)
+        # в каталоге отчётов, хотя бы «на вид». Пара, которой в каталоге нет
+        # вовсе, ничем не лучше пустой ячейки: искать по ней нечего, зато
+        # сказать о ней надо.
+        has_rc = _note_pair(report, index, network, plant)
 
-        matched: list[int] = []
-        if has_rc and path is not None:
-            rid = by_full.get((_low(network), _low(plant), _low(path), _low(name)))
-            if rid is not None:
-                matched = [rid]
-        if not matched and has_rc:
-            candidates = by_net_plant.get(
-                (_low(network), _low(plant), _low(name)), []
-            )
-            # Неоднозначно даже внутри одного завода — угадывать нельзя.
-            matched = candidates if len(candidates) == 1 else []
+        matched, loosely = index.find(name, path, network, plant, has_rc)
         if not matched:
-            candidates = by_name.get(_low(name), [])
+            candidates, loosely = index.namesakes(name)
             if not has_rc and not _named_pair(network, plant):
                 matched = candidates          # раздаём всем тёзкам, см. docstring
             elif len(candidates) == 1:
                 matched = candidates
         if not matched:
             stats.sql_unmatched.append(name)
-            _explain_miss(report, name, by_name, has_rc, network, plant)
+            _explain_miss(report, name, index, has_rc, network, plant)
             continue
+        report.lookalike_rows += int(loosely)
         report.matched_rows += 1
 
         # dict, а не список: одна строка файла может лечь на несколько отчётов,
@@ -924,16 +1007,26 @@ def _fill_db_pairs(report: MatchReport, rows_db: list[tuple]) -> None:
 
 def _note_pair(
     report: MatchReport,
-    known_pairs: set[tuple[str, str]],
+    index: _ReportIndex,
     network: str | None,
     plant: str | None,
 ) -> bool:
-    """Записывает разрез строки в отчёт и говорит, годится ли он для поиска."""
+    """Записывает разрез строки в отчёт и говорит, годится ли он для поиска.
+
+    Пара, совпавшая только «на вид», для поиска годится: развести её с
+    каталожной может лишь точное сравнение, а человек, глядя в оба файла,
+    видит одну надпись. Но запоминается она отдельно — чтобы страница загрузки
+    назвала обе записи и позицию отличающегося символа.
+    """
     if not _named_pair(network, plant):
         return False
     label = f"{network} / {plant}"
     report.file_pairs[label] = report.file_pairs.get(label, 0) + 1
-    if (_low(network), _low(plant)) in known_pairs:
+    state, catalog = index.pair_state(network, plant)
+    if state == "exact":
+        return True
+    if state == "lookalike":
+        report.lookalike_pairs[label] = catalog
         return True
     report.unknown_pairs[label] = report.unknown_pairs.get(label, 0) + 1
     return False
@@ -942,13 +1035,13 @@ def _note_pair(
 def _explain_miss(
     report: MatchReport,
     name: str,
-    by_name: dict[str, list[int]],
+    index: _ReportIndex,
     has_rc: bool,
     network: str | None,
     plant: str | None,
 ) -> None:
     """Раскладывает несопоставленную строку по причинам — см. `MatchReport`."""
-    if not by_name.get(_low(name)):
+    if not index.namesakes(name)[0]:
         report.name_unknown.append(name)
     elif _named_pair(network, plant) and not has_rc:
         report.rc_unknown.append(name)

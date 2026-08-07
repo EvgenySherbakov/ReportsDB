@@ -84,6 +84,19 @@ file records only what a user can see.
   currently busy" warning asking to wait and refresh, and "Load data" stays
   fully usable — a file can be picked and loaded without waiting for someone
   else to release the database.
+- **Matching no longer separates rows that differ invisibly.** Cyrillic «Х» and
+  Latin «X», «С» and «C», «Е» and «E» are the same inscription on screen and
+  different strings to an exact comparison. One such letter in a network's name
+  kept the query text from reaching most of the reports, and there was nothing
+  to explain the discrepancy with: the customer looked into both files and saw
+  identical names. A loose comparison is now tried after the exact one:
+  different alphabets, letter case, non-breaking spaces, «ё» versus «е», an
+  em dash versus a hyphen. **An exact match always wins** — if the catalog holds
+  both spellings, a row goes to its own. The load reports how many rows matched
+  "by looks" and names **the position and the code point of the differing
+  character**, so the typo can be found by searching the file itself. Digits are
+  deliberately not equated with lookalike letters: Cyrillic «З» instead of «3»
+  is better named than silently corrected.
 - **The SQL query text reached a fifth of the reports at best** when the ТС
   (network) and Завод (plant) columns in the query file were filled differently
   from the main file. Empty cells were enough — and they are empty all the time,

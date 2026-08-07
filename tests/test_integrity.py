@@ -807,6 +807,97 @@ def test_report_sql_load_survives_when_nothing_matches(tmp_path_factory):
     assert stats.sql_match.name_unknown == ["Такого отчёта нет"]
 
 
+def test_report_sql_matches_a_network_written_in_another_alphabet(tmp_path_factory):
+    """Кириллическая «Х» и латинская «X» — одна надпись и разные строки.
+
+    Реальный случай заказчика: в каталоге отчётов ТС записана с кириллической
+    «Х», в файле запросов — с латинской «X». Точное сравнение эти пары
+    разводит, из-за чего сопоставление сваливалось на «имя, единственное в
+    базе», и текст запроса не доезжал до больше́й части отчётов. Объяснить это
+    заказчику было нельзя: на экране обе записи выглядят одинаково.
+    """
+    import pandas as pd
+
+    reports = pd.DataFrame(
+        [
+            {"№": 1, "ТС": "ТСХ", "Завод": "358",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T1"},
+            {"№": 2, "ТС": "ТС5", "Завод": "277",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T2"},
+        ]
+    )
+    sql = pd.DataFrame(
+        [{"№": 1, "ТС": "ТСX", "Завод": "358",
+          "Наименование отчета": "Общий отчёт",
+          "Запрос к базе данных": "SELECT 1"}]
+    )
+    stats, texts = _sql_case(tmp_path_factory, "sql_lookalike", reports, sql)
+
+    assert texts == ["SELECT 1", None], (
+        "запрос обязан лечь на завод 358 и не задеть завод 277"
+    )
+    report = stats.sql_match
+    assert report.unknown_pairs == {}, "пара нашлась, пусть и не точным ключом"
+    assert report.lookalike_pairs == {"ТСX / 358": "ТСХ / 358"}
+    assert report.lookalike_rows == 1
+
+
+def test_exact_spelling_wins_over_a_lookalike_one(tmp_path_factory):
+    """Грубый ключ — только запасной: точное совпадение всегда старше.
+
+    Если в каталоге есть обе записи ТС, латинская и кириллическая, строка
+    файла обязана уйти к своей, а не к похожей. Иначе «терпимость к опечатке»
+    начала бы портить данные там, где никакой опечатки нет.
+    """
+    import pandas as pd
+
+    reports = pd.DataFrame(
+        [
+            {"№": 1, "ТС": "ТСХ", "Завод": "358",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T1"},
+            {"№": 2, "ТС": "ТСX", "Завод": "358",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T2"},
+        ]
+    )
+    sql = pd.DataFrame(
+        [{"№": 1, "ТС": "ТСX", "Завод": "358",
+          "Наименование отчета": "Общий отчёт",
+          "Запрос к базе данных": "SELECT 1"}]
+    )
+    stats, texts = _sql_case(tmp_path_factory, "sql_exact_wins", reports, sql)
+
+    assert texts == [None, "SELECT 1"], "текст обязан уйти к точной записи ТС"
+    assert stats.sql_match.lookalike_rows == 0
+
+
+def test_loose_key_keeps_different_values_apart():
+    """Грубый ключ терпим к записи, но не к смыслу.
+
+    Он сводит вместе то, что выглядит одинаково: разные алфавиты, регистр,
+    неразрывные пробелы, «ё» против «е», длинное тире против дефиса. Всё
+    остальное обязано остаться разным — иначе запрос уехал бы к чужому отчёту.
+    """
+    from reportsdb.normalize import loose_key, spell_out_difference
+
+    assert loose_key("ТСX") == loose_key("ТСХ")          # латинская X и кириллическая Х
+    assert loose_key("Отчёт  продаж") == loose_key("отчет продаж")
+    assert loose_key("Склад №1") == loose_key("Склад №1")
+    assert loose_key("Отчёт — итог") == loose_key("Отчёт - итог")
+
+    assert loose_key("Продажи") != loose_key("Покупки")
+    assert loose_key("Завод 358") != loose_key("Завод 0358")
+    # Цифра и похожая на неё буква намеренно НЕ сводятся: это тоже опечатка,
+    # но такую лучше назвать, чем молча исправить.
+    assert loose_key("З58") != loose_key("358")
+
+    assert "U+0058" in spell_out_difference("ТСX", "ТСХ")
+    assert "U+0425" in spell_out_difference("ТСX", "ТСХ")
+
+
 def test_duration_is_seconds_not_milliseconds(full_db):
     """Длительность хранится в секундах — как в исходном файле."""
     worst = full_db.execute(

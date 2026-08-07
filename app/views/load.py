@@ -25,6 +25,7 @@ from _shared import (
 from reportsdb.config import RAW_DIR, SCHEMA_VERSION, load_mapping, resolve_columns
 from reportsdb.etl import build
 from reportsdb.excel import list_sheets, read_all
+from reportsdb.normalize import spell_out_difference
 
 page_setup("Загрузка данных", "📥")
 
@@ -155,7 +156,28 @@ def _show_match_report(what: str, report) -> None:
     «имя, встречающееся в базе один раз», и при общих наименованиях заводов
     доезжает пятая часть строк без единой жалобы.
     """
-    if not report.rows or not report.unmatched_rows:
+    if not report.rows:
+        return
+
+    if report.lookalike_pairs or report.lookalike_rows:
+        pairs = "; ".join(
+            f"«{in_file}» в файле и «{in_catalog}» в каталоге "
+            f"({spell_out_difference(in_file, in_catalog)})"
+            for in_file, in_catalog in list(report.lookalike_pairs.items())[:3]
+        )
+        more = len(report.lookalike_pairs) - 3
+        if more > 0:
+            pairs += f"; таких пар ещё: {more}"
+        st.info(
+            f"**{what}: {report.lookalike_rows} строк сопоставились «на вид».** "
+            + (f"ТС и Завод записаны по-разному: {pairs}. " if pairs else "")
+            + "Такие строки различает только точное сравнение — на экране это "
+            "одна и та же надпись, поэтому данные загружены. Чтобы не "
+            "зависеть от этого впредь, стоит привести запись к одному виду.",
+            icon="🔎",
+        )
+
+    if not report.unmatched_rows:
         return
 
     share = report.unmatched_rows / report.rows
