@@ -84,6 +84,29 @@ file records only what a user can see.
   currently busy" warning asking to wait and refresh, and "Load data" stays
   fully usable — a file can be picked and loaded without waiting for someone
   else to release the database.
+- **The SQL query text reached a fifth of the reports at best** when the ТС
+  (network) and Завод (plant) columns in the query file were filled differently
+  from the main file. Empty cells were enough — and they are empty all the time,
+  because in the export those columns are merged vertically and the value sits
+  only in the first row of the range. A plant code written differently
+  (`0358` versus `358`) broke it the same way. In both cases precise matching
+  fell away and the fallback accepted only names unique across the whole
+  database — on a database of several plants with shared names, that is exactly
+  the fifth, and nothing said a word about it. Now an empty cell means "no plant
+  stated": the row lands on every report with that name, as in a file without
+  those columns. **The catalogs were innocent** — a catalog mismatch only loses
+  true namesakes within one plant.
+- **The load now explains why an auxiliary file's rows did not land on
+  reports.** Instead of "N names did not match" — a breakdown by reason: the
+  name is absent from the catalog on every plant / the name exists but not on
+  those ТС and Завод / the name has namesakes on the plant and the catalog did
+  not match. When the file's ТС and Завод are not found in the report catalog
+  they are named outright, next to the ones the catalog does have, so a
+  difference in how a plant code is written shows at once. Works for the
+  statistics file and the query file alike.
+- **The whole load aborted when not a single row of the query file matched.**
+  An optional file crashed the database build with a DuckDB error. It is now a
+  line in the load report, and the database gets built.
 - **A standalone usage-statistics file silently lost rows** when it had ТС
   (network) and Завод (plant) columns but no single "Каталог" (catalog path)
   column — the usual shape of that export, since the main file carries the path

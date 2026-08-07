@@ -681,6 +681,131 @@ def test_report_sql_without_plant_columns_is_broadcast_by_name(tmp_path_factory)
     assert texts == ["SELECT 1 FROM dual", "SELECT 1 FROM dual"]
 
 
+def _sql_case(tmp_path_factory, name, reports, sql):
+    """Собирает базу из пары «файл отчётов + файл запросов» и отдаёт результат."""
+    src_dir = tmp_path_factory.mktemp(name)
+    reports_path = src_dir / "reports.xlsx"
+    sql_path = src_dir / "sql.xlsx"
+    reports.to_excel(reports_path, index=False)
+    sql.to_excel(sql_path, index=False)
+
+    base = load_mapping()
+    mapping = Mapping(
+        reports=base.reports,
+        table_sizes=SectionConfig(),
+        report_usage=SectionConfig(),
+        report_sql=base.report_sql,
+    )
+    mapping.report_sql.file = str(sql_path)
+    db = tmp_path_factory.mktemp(name + "_db") / "db.duckdb"
+    stats = build(reports_path, db, mapping)
+    con = duckdb.connect(str(db), read_only=True)
+    texts = [r[0] for r in con.execute(
+        "SELECT sql_text FROM dim_report ORDER BY report_id"
+    ).fetchall()]
+    con.close()
+    return stats, texts
+
+
+def _two_plants_one_name():
+    """Одно наименование на двух заводах — обычная для заказчика картина."""
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {"№": 1, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T1"},
+            {"№": 2, "ТС": "СЕТЬ-1", "Завод": "Завод-Б",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T2"},
+        ]
+    )
+
+
+def test_report_sql_lands_when_plant_cells_are_left_empty(tmp_path_factory):
+    """Пустые ячейки ТС и Завода не должны отменять сопоставление.
+
+    В выгрузках эти колонки объединены по вертикали: значение стоит в первой
+    строке диапазона, дальше пусто. Раньше «разрез» определялся по наличию
+    колонок в шапке, поэтому весь такой файл считался разрезанным по заводам,
+    сопоставление сваливалось на «имя, единственное в базе», и на базе из
+    нескольких заводов с общими наименованиями текст доезжал до пятой части
+    отчётов — молча. Пустая ячейка не несёт сведений о заводе, и строка обязана
+    вести себя так же, как строка файла без этих колонок.
+    """
+    import pandas as pd
+
+    sql = pd.DataFrame(
+        [
+            {"№": 1, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Наименование отчета": "Общий отчёт",
+             "Запрос к базе данных": "SELECT 1"},
+            {"№": 2, "ТС": "", "Завод": "",
+             "Наименование отчета": "Общий отчёт",
+             "Запрос к базе данных": "SELECT 2"},
+        ]
+    )
+    stats, texts = _sql_case(tmp_path_factory, "sql_merged", _two_plants_one_name(), sql)
+
+    assert stats.sql_unmatched == []
+    assert stats.sql_loaded == 2
+    # Первая строка точна по заводу, вторая раздаётся тёзкам и перекрывает её:
+    # порядок строк файла и есть порядок перезаписи.
+    assert texts == ["SELECT 2", "SELECT 2"]
+
+
+def test_report_sql_names_the_plant_codes_it_could_not_find(tmp_path_factory):
+    """Завод, которого нет в каталоге, обязан быть назван, а не проглочен.
+
+    Это самая дорогая из причин: сопоставление молча съезжает на «имя,
+    встречающееся в базе один раз», и при общих наименованиях доезжает пятая
+    часть строк. Разбор по причинам и есть ответ на вопрос «где ошибка».
+    """
+    import pandas as pd
+
+    sql = pd.DataFrame(
+        [
+            # Ведущий ноль в коде завода — реальная причина расхождения.
+            {"№": 1, "ТС": "СЕТЬ-1", "Завод": "0Завод-А",
+             "Наименование отчета": "Общий отчёт",
+             "Запрос к базе данных": "SELECT 1"},
+        ]
+    )
+    stats, texts = _sql_case(tmp_path_factory, "sql_badrc", _two_plants_one_name(), sql)
+
+    assert texts == [None, None], (
+        "неоднозначное имя не должно достаться случайному заводу"
+    )
+    report = stats.sql_match
+    assert report.rows == 1 and report.matched_rows == 0
+    assert report.unknown_pairs == {"СЕТЬ-1 / 0Завод-А": 1}
+    assert report.db_pairs == ["СЕТЬ-1 / Завод-А", "СЕТЬ-1 / Завод-Б"]
+    assert report.rc_unknown == ["Общий отчёт"], (
+        "причина именно в разрезе: наименование в каталоге есть"
+    )
+    assert report.name_unknown == [] and report.ambiguous == []
+
+
+def test_report_sql_load_survives_when_nothing_matches(tmp_path_factory):
+    """Ни одна строка не легла — это диагноз, а не повод обрывать загрузку.
+
+    `executemany` не принимает пустой список параметров и падает ошибкой
+    DuckDB, унося с собой всю сборку базы: файл отчётов уже разобран, но база
+    остаётся недостроенной из-за необязательного файла.
+    """
+    import pandas as pd
+
+    sql = pd.DataFrame(
+        [{"№": 1, "Наименование отчета": "Такого отчёта нет",
+          "Запрос к базе данных": "SELECT 1"}]
+    )
+    stats, texts = _sql_case(tmp_path_factory, "sql_nomatch", _two_plants_one_name(), sql)
+
+    assert texts == [None, None]
+    assert stats.sql_loaded == 0
+    assert stats.sql_match.name_unknown == ["Такого отчёта нет"]
+
 
 def test_duration_is_seconds_not_milliseconds(full_db):
     """Длительность хранится в секундах — как в исходном файле."""

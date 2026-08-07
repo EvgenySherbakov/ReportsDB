@@ -145,6 +145,57 @@ def show_mapping(title: str, resolved: dict, spec: list[tuple]) -> list[str]:
     return losses
 
 
+def _show_match_report(what: str, report) -> None:
+    """Разбор несопоставленных строк вспомогательного файла по причинам.
+
+    Раньше здесь стояло одно «не сопоставилось N наименований». По такой
+    строке нельзя понять, чинить файл, загружать другие заводы или всё в
+    порядке, — а причины требуют совершенно разных действий. Самая дорогая из
+    них — расхождение в записи завода: сопоставление тогда молча съезжает на
+    «имя, встречающееся в базе один раз», и при общих наименованиях заводов
+    доезжает пятая часть строк без единой жалобы.
+    """
+    if not report.rows or not report.unmatched_rows:
+        return
+
+    share = report.unmatched_rows / report.rows
+    st.warning(
+        f"**{what}: не сопоставилось строк {report.unmatched_rows} из "
+        f"{report.rows} ({share:.0%}).** Разбор по причинам ниже."
+    )
+
+    if report.unknown_pairs:
+        pairs = ", ".join(
+            f"«{label}» — строк: {count}" for label, count in
+            sorted(report.unknown_pairs.items(), key=lambda kv: -kv[1])[:10]
+        )
+        known = ", ".join(f"«{p}»" for p in report.db_pairs[:10]) or "—"
+        st.error(
+            "**ТС и Завод в файле не совпадают с каталогом отчётов.** "
+            f"В файле: {pairs}. В каталоге: {known}.\n\n"
+            "Пока пара не совпадает, строка ищется только по наименованию и "
+            "проходит лишь тогда, когда такое наименование в базе одно. "
+            "Именно так и выглядит «сопоставилась пятая часть».\n\n"
+            "**Что сделать:** привести запись ТС и Завода к тому же виду, что "
+            "в основном файле отчётов (частая причина — ведущий ноль в коде "
+            "завода), либо загрузить основной файл того завода, о котором "
+            "этот файл. Если разреза в файле нет вовсе — удалите пустые "
+            "колонки ТС и Завод: тогда строка ляжет на все отчёты-тёзки."
+        )
+    reasons = [
+        ("наименования нет в каталоге ни на одном заводе", report.name_unknown),
+        ("наименование есть, но не на тех ТС и Заводе", report.rc_unknown),
+        ("наименование есть у нескольких отчётов завода, каталог не совпал",
+         report.ambiguous),
+    ]
+    lines = [
+        f"- {len(names)} — {text}. Например: {', '.join(names[:3])}"
+        for text, names in reasons if names
+    ]
+    if lines:
+        st.markdown("\n".join(lines))
+
+
 # --- Текущее состояние базы ------------------------------------------------
 
 st.subheader("Текущее состояние")
@@ -603,19 +654,10 @@ if st.button("Загрузить", type="primary", use_container_width=True):
         )
     if stats.size_plants > 1:
         st.caption(f"В файле размеров различается {stats.size_plants} пар «сеть + завод».")
-    if stats.usage_unmatched:
-        st.warning(
-            f"Статистика по {len(stats.usage_unmatched)} отчётам не сопоставилась "
-            f"с каталогом. Например: {', '.join(stats.usage_unmatched[:5])}"
-        )
+    _show_match_report("Статистика", stats.usage_match)
     if stats.sql_loaded:
         st.caption(f"SQL-запрос получили отчётов: {stats.sql_loaded}.")
-    if stats.sql_unmatched:
-        st.warning(
-            f"Запросы по {len(stats.sql_unmatched)} наименованиям не "
-            f"сопоставились с каталогом отчётов. Например: "
-            f"{', '.join(stats.sql_unmatched[:5])}"
-        )
+    _show_match_report("Запросы", stats.sql_match)
 
     con = try_read_only_connect(DB_PATH)
     if con is None:

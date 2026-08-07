@@ -57,6 +57,39 @@ SCHEMA_PRIORITY = {"не определена": 0, "файл размеров": 
 
 
 @dataclass
+class MatchReport:
+    """Почему строки вспомогательного файла не легли на отчёты.
+
+    Одно число «не сопоставилось N строк» бесполезно: причины требуют разных
+    действий. Имени нет в базе вовсе — не тот файл или не те заводы загружены;
+    ТС и Завод из файла нет в каталоге — разошлась запись кода завода, и
+    сопоставление свалилось на «имя, встречающееся в базе один раз»; имя есть,
+    но у него тёзки, а каталог не совпал — нужен каталог или разрез.
+    """
+
+    #: строк файла, где есть и наименование, и значение
+    rows: int = 0
+    #: строк, для которых отчёт нашёлся
+    matched_rows: int = 0
+    #: имени нет в каталоге отчётов ни на одном заводе
+    name_unknown: list[str] = field(default_factory=list)
+    #: имя в каталоге есть, но ТС и Завода из файла там нет
+    rc_unknown: list[str] = field(default_factory=list)
+    #: имя есть, тёзки есть, каталог не совпал — выбрать не из чего
+    ambiguous: list[str] = field(default_factory=list)
+    #: «ТС / Завод» из файла → сколько строк
+    file_pairs: dict[str, int] = field(default_factory=dict)
+    #: те из них, которых нет в каталоге отчётов
+    unknown_pairs: dict[str, int] = field(default_factory=dict)
+    #: «ТС / Завод», которые есть в каталоге отчётов
+    db_pairs: list[str] = field(default_factory=list)
+
+    @property
+    def unmatched_rows(self) -> int:
+        return self.rows - self.matched_rows
+
+
+@dataclass
 class LoadStats:
     rows_read: int = 0
     rows_loaded: int = 0
@@ -84,11 +117,13 @@ class LoadStats:
     size_files_without_plant: bool = False
     usage_loaded: int = 0
     usage_unmatched: list[str] = field(default_factory=list)
+    usage_match: MatchReport = field(default_factory=MatchReport)
     # Сколько отчётов (по report_id, не по строкам файла) получили текст
     # SQL-запроса — одна строка файла может лечь сразу на несколько report_id,
     # если то же наименование заведено на нескольких заводах.
     sql_loaded: int = 0
     sql_unmatched: list[str] = field(default_factory=list)
+    sql_match: MatchReport = field(default_factory=MatchReport)
 
 
 def _sha256(path: Path) -> str:
@@ -684,24 +719,32 @@ def _load_report_usage(
     for rid, name, _, _, _ in rows_db:
         by_name.setdefault(_low(name), []).append(rid)
 
+    report = stats.usage_match
+    _fill_db_pairs(report, rows_db)
+    known_pairs = {(_low(net), _low(pl)) for _, _, _, net, pl in rows_db}
+
     rows: list[tuple] = []
     seen: set[int] = set()
     for _, row in df.iterrows():
         name = clean_text(_cell(row, cols["report_name"]))
         if name is None:
             continue
+        report.rows += 1
 
         raw_path = clean_text(_cell(row, cols.get("catalog_path")))
         path = normalise_catalog_path(raw_path) if raw_path else None
         network = clean_text(_cell(row, cols.get("network")))
         plant = clean_text(_cell(row, cols.get("plant")))
+        # В отличие от текста запроса статистика привязана к площадке: раздать
+        # её всем тёзкам нельзя, поэтому неизвестный разрез только отмечается.
+        has_rc = _note_pair(report, known_pairs, network, plant)
 
         report_id = None
         if path is not None:
             report_id = by_full.get((_low(network), _low(plant), _low(path), _low(name)))
             if report_id is None:
                 report_id = by_path.get((_low(path), _low(name)))
-        if report_id is None and network is not None and plant is not None:
+        if report_id is None and has_rc:
             candidates = by_net_plant.get((_low(network), _low(plant), _low(name)), [])
             # Неоднозначно и внутри одного завода — сопоставлять нельзя.
             report_id = candidates[0] if len(candidates) == 1 else None
@@ -711,10 +754,12 @@ def _load_report_usage(
             report_id = candidates[0] if len(candidates) == 1 else None
         if report_id is None:
             stats.usage_unmatched.append(name)
+            _explain_miss(report, name, by_name, has_rc, network, plant)
             continue
         if report_id in seen:
             continue
         seen.add(report_id)
+        report.matched_rows += 1
 
         rows.append(
             (
@@ -758,13 +803,22 @@ def _load_report_sql(
 
     1. `(сеть, завод, каталог, имя)` — полный ключ `dim_report`;
     2. `(сеть, завод, имя)` — для файлов, где каталога нет;
-    3. одно имя — **и здесь правило отличается от статистики**. Если в файле
-       нет колонок ТС и Завода вовсе, текст применяется ко ВСЕМ отчётам с этим
-       именем: запрос описывает определение отчёта, а не площадку, и общий
-       текст для отчёта-тёзки на соседнем заводе — не ошибка, а точный смысл
-       данных. Если ТС с Заводом в файле есть, но строка ими не сопоставилась,
-       имя годится только когда оно единственное в базе — иначе запрос ушёл бы
-       на чужой завод.
+    3. одно имя — **и здесь правило отличается от статистики**. Если
+       организационного разреза у строки нет, текст применяется ко ВСЕМ
+       отчётам с этим именем: запрос описывает определение отчёта, а не
+       площадку, и общий текст для отчёта-тёзки на соседнем заводе — не
+       ошибка, а точный смысл данных. Если разрез у строки есть, но по нему
+       не нашлось, имя годится только когда оно единственное в базе — иначе
+       запрос ушёл бы на чужой завод.
+
+    **Разрез определяется по строке, а не по файлу.** Раньше достаточно было
+    наличия колонок ТС и Завода в шапке, чтобы весь файл считался «с
+    разрезом». В выгрузках эти колонки сплошь и рядом объединены по
+    вертикали: значение стоит только в первой строке диапазона, а остальные
+    ячейки пусты. Пустая ячейка не несёт никакой информации о заводе, но
+    прежнее правило всё равно требовало «имя, единственное в базе»,
+    и на базе из нескольких заводов с общими наименованиями текст доезжал
+    едва до пятой части отчётов — молча, без единого сообщения.
     """
     paths = _section_files(section)
     if not paths:
@@ -777,10 +831,6 @@ def _load_report_sql(
     if not cols.get("sql_text"):
         raise SystemExit("В файле SQL-запросов нет колонки с текстом запроса.")
 
-    # Есть ли в файле организационный разрез. От этого зависит правило
-    # последнего уровня: без него имя раздаётся всем тёзкам, с ним — только
-    # однозначное.
-    has_rc = bool(cols.get("network")) and bool(cols.get("plant"))
     level_cols = [cols.get("folder_l1"), cols.get("folder_l2"), cols.get("folder_l3")]
     use_levels = any(level_cols)
 
@@ -798,12 +848,17 @@ def _load_report_sql(
     for rid, name, _, _, _ in rows_db:
         by_name.setdefault(_low(name), []).append(rid)
 
+    report = stats.sql_match
+    _fill_db_pairs(report, rows_db)
+    known_pairs = {(_low(net), _low(pl)) for _, _, _, net, pl in rows_db}
+
     updates: dict[int, str] = {}
     for _, row in df.iterrows():
         name = clean_text(_cell(row, cols["report_name"]))
         text = clean_text(_cell(row, cols["sql_text"]))
         if name is None or text is None:
             continue
+        report.rows += 1
 
         if use_levels:
             path = join_folders(*(_cell(row, c) for c in level_cols))
@@ -812,13 +867,17 @@ def _load_report_sql(
             path = normalise_catalog_path(raw_path) if raw_path else None
         network = clean_text(_cell(row, cols.get("network")))
         plant = clean_text(_cell(row, cols.get("plant")))
+        # Разрез строки — только когда обе ячейки заполнены И такая пара есть
+        # в каталоге отчётов. Пара, которой в каталоге нет, ничем не лучше
+        # пустой ячейки: искать по ней нечего, зато сказать о ней надо.
+        has_rc = _note_pair(report, known_pairs, network, plant)
 
         matched: list[int] = []
-        if path is not None:
+        if has_rc and path is not None:
             rid = by_full.get((_low(network), _low(plant), _low(path), _low(name)))
             if rid is not None:
                 matched = [rid]
-        if not matched and network is not None and plant is not None:
+        if not matched and has_rc:
             candidates = by_net_plant.get(
                 (_low(network), _low(plant), _low(name)), []
             )
@@ -826,13 +885,15 @@ def _load_report_sql(
             matched = candidates if len(candidates) == 1 else []
         if not matched:
             candidates = by_name.get(_low(name), [])
-            if not has_rc:
+            if not has_rc and not _named_pair(network, plant):
                 matched = candidates          # раздаём всем тёзкам, см. docstring
             elif len(candidates) == 1:
                 matched = candidates
         if not matched:
             stats.sql_unmatched.append(name)
+            _explain_miss(report, name, by_name, has_rc, network, plant)
             continue
+        report.matched_rows += 1
 
         # dict, а не список: одна строка файла может лечь на несколько отчётов,
         # а разные строки — претендовать на один и тот же report_id. Побеждает
@@ -840,11 +901,59 @@ def _load_report_sql(
         for rid in matched:
             updates[rid] = text
 
-    con.executemany(
-        "UPDATE dim_report SET sql_text = ? WHERE report_id = ?",
-        [(text, rid) for rid, text in updates.items()],
-    )
+    if updates:
+        # executemany не принимает пустой список и падает — а «ни одна строка
+        # не легла» это диагноз, а не повод обрывать всю загрузку.
+        con.executemany(
+            "UPDATE dim_report SET sql_text = ? WHERE report_id = ?",
+            [(text, rid) for rid, text in updates.items()],
+        )
     stats.sql_loaded = len(updates)
+
+
+def _named_pair(network: str | None, plant: str | None) -> bool:
+    """Разрез в строке указан — неважно, нашёлся он в каталоге или нет."""
+    return network is not None and plant is not None
+
+
+def _fill_db_pairs(report: MatchReport, rows_db: list[tuple]) -> None:
+    report.db_pairs = sorted(
+        {f"{net} / {pl}" for _, _, _, net, pl in rows_db if net and pl}
+    )
+
+
+def _note_pair(
+    report: MatchReport,
+    known_pairs: set[tuple[str, str]],
+    network: str | None,
+    plant: str | None,
+) -> bool:
+    """Записывает разрез строки в отчёт и говорит, годится ли он для поиска."""
+    if not _named_pair(network, plant):
+        return False
+    label = f"{network} / {plant}"
+    report.file_pairs[label] = report.file_pairs.get(label, 0) + 1
+    if (_low(network), _low(plant)) in known_pairs:
+        return True
+    report.unknown_pairs[label] = report.unknown_pairs.get(label, 0) + 1
+    return False
+
+
+def _explain_miss(
+    report: MatchReport,
+    name: str,
+    by_name: dict[str, list[int]],
+    has_rc: bool,
+    network: str | None,
+    plant: str | None,
+) -> None:
+    """Раскладывает несопоставленную строку по причинам — см. `MatchReport`."""
+    if not by_name.get(_low(name)):
+        report.name_unknown.append(name)
+    elif _named_pair(network, plant) and not has_rc:
+        report.rc_unknown.append(name)
+    else:
+        report.ambiguous.append(name)
 
 
 def _low(value: str | None) -> str:
