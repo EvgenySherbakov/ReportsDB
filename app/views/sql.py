@@ -169,6 +169,13 @@ PRESETS = {
         "SELECT DISTINCT full_name, total_mb, plant\n"
         "FROM v_tables_catalog\nWHERE report_count = 0\n"
         "ORDER BY total_mb DESC\nLIMIT 50;",
+    "Таблицы, которые держат ради отчёта другого завода":
+        "-- rc_report_count = 0: на этом заводе таблицу не касается ни один\n"
+        "-- отчёт, а report_count > 0 означает, что где-то она нужна.\n"
+        "SELECT network, plant, full_name, total_mb, report_count\n"
+        "FROM v_tables_catalog\n"
+        "WHERE rc_report_count = 0 AND report_count > 0\n"
+        "ORDER BY total_mb DESC NULLS LAST\nLIMIT 50;",
     "Размер таблиц отчёта по его заводу":
         "SELECT r.report_name, t.full_name, s.total_mb, s.size_is_plant_specific\n"
         "FROM v_report_table_size s\n"

@@ -1069,8 +1069,8 @@ def test_schema_version_matches_view_set():
     digest = hashlib.sha256()
     for name in ("01_schema.sql", "02_views.sql"):
         digest.update((ROOT / "sql" / name).read_bytes())
-    # Слепок SQL на момент SCHEMA_VERSION = 13.
-    expected = "adcdad"  # первые 6 знаков; обновлять вместе с версией
+    # Слепок SQL на момент SCHEMA_VERSION = 14.
+    expected = "21a44c"  # первые 6 знаков; обновлять вместе с версией
     actual = digest.hexdigest()[:6]
     assert actual == expected, (
         f"SQL изменился (слепок {actual}, ожидался {expected}). "
@@ -1525,6 +1525,60 @@ def test_tables_catalog_adds_nothing_from_reports(full_db):
         "                  ON t.table_id = s.table_id WHERE t.full_name = c.full_name)"
     ).fetchone()[0]
     assert leaked == 0
+
+
+def test_unused_tables_are_counted_per_dc_not_across_the_base(full_db):
+    """«Не используются отчётами» считается по отчётам своего РЦ.
+
+    Таблица заведена на каждом заводе отдельной строкой, а `report_count`
+    считает отчёты по всей базе. На странице «в разрезе РЦ» это разные вопросы:
+    таблица, к которой тянется отчёт соседнего завода, на этом заводе всё равно
+    лежит без дела. При 70% совпадения отчётов между сетями общий счёт занижал
+    «не используются» примерно вдвое — то есть отвечал не на тот вопрос.
+    """
+    blind, own = full_db.execute(
+        """
+        SELECT COUNT(DISTINCT full_name) FILTER (WHERE report_count = 0),
+               COUNT(DISTINCT full_name) FILTER (WHERE rc_report_count = 0)
+        FROM v_tables_catalog
+        """
+    ).fetchone()
+    assert own > blind, (
+        "проверка бессмысленна, если в демо-данных нет таблиц, которые держат "
+        "ради отчёта другого завода"
+    )
+
+    # Ни одна строка не может насчитать по своему РЦ больше, чем по всей базе.
+    impossible = full_db.execute(
+        "SELECT COUNT(*) FROM v_tables_catalog WHERE rc_report_count > report_count"
+    ).fetchone()[0]
+    assert impossible == 0
+
+
+def test_dc_comparison_counts_used_tables_by_its_own_reports(full_db):
+    """`v_network_overview` и таблица №1 обязаны считать одинаково.
+
+    Иначе «доля под отчётами» на «Сетях и заводах» и «не используются» в №1
+    противоречили бы друг другу на одних и тех же данных.
+    """
+    rows = full_db.execute(
+        """
+        SELECT o.network, o.plant, o.used_table_count, c.used_here
+        FROM v_network_overview o
+        JOIN (
+            SELECT network, plant,
+                   COUNT(DISTINCT full_name) FILTER (WHERE rc_report_count > 0) AS used_here
+            FROM v_tables_catalog GROUP BY 1, 2
+        ) c ON c.network IS NOT DISTINCT FROM o.network
+           AND c.plant   IS NOT DISTINCT FROM o.plant
+        """
+    ).fetchall()
+    assert rows, "в демо-данных есть РЦ с размерами — сверять есть что"
+    for network, plant, in_overview, in_catalog in rows:
+        assert in_overview == in_catalog, (
+            f"{network} / {plant}: «Сети и заводы» показывают {in_overview} "
+            f"таблиц под отчётами, таблица №1 — {in_catalog}"
+        )
 
 
 def test_tables_catalog_is_independent_of_reports(full_db):

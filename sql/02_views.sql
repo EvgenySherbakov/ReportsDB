@@ -230,6 +230,10 @@ WITH by_reports AS (
 by_tables AS (
     -- То же, что даёт v_tables_catalog, но собранное здесь: эта витрина
     -- определена ниже по файлу, а порядок создания в DuckDB имеет значение.
+    -- «Под отчётами» считается по отчётам ЭТОГО завода, а не по всей базе.
+    -- Каждая строка витрины — это РЦ, и таблица, к которой тянется отчёт
+    -- соседнего завода, здесь лежит без дела. Общий счёт по базе при 70%
+    -- совпадения отчётов между сетями показывал бы почти всё используемым.
     SELECT
         s.network, s.plant,
         COUNT(DISTINCT t.full_name)                    AS db_table_count,
@@ -242,9 +246,14 @@ by_tables AS (
     FROM fact_table_size s
     JOIN dim_table t ON t.table_id = s.table_id
     LEFT JOIN (
-        SELECT table_id, COUNT(DISTINCT report_id) AS report_count
-        FROM bridge_report_table GROUP BY 1
+        SELECT b.table_id, r.network, r.plant,
+               COUNT(DISTINCT b.report_id) AS report_count
+        FROM bridge_report_table b
+        JOIN dim_report r ON r.report_id = b.report_id
+        GROUP BY 1, 2, 3
     ) u ON u.table_id = s.table_id
+       AND u.network IS NOT DISTINCT FROM s.network
+       AND u.plant   IS NOT DISTINCT FROM s.plant
     GROUP BY 1, 2
 )
 SELECT
@@ -395,7 +404,13 @@ ORDER BY jaccard DESC, p.shared_tables DESC;
 -- упомянуты в отчётах, но в файле размеров отсутствуют, сюда НЕ подмешиваются
 -- — мост «отчёт ↔ таблица» только ссылается на этот список. Сколько таких
 -- ссылок повисло без размера, видно в size_coverage_pct отчёта.
--- Колонка report_count добавлена справочно и на состав строк не влияет.
+-- Колонки report_count и rc_report_count добавлены справочно и на состав строк
+-- не влияют. Их РАЗНИЦА принципиальна: report_count считает отчёты по всей
+-- базе, rc_report_count — только отчёты того же завода, что и строка. На
+-- странице «в разрезе РЦ» верен второй: таблица, к которой тянется отчёт
+-- соседнего завода, на этом заводе всё равно лежит без дела, и по общему счёту
+-- она выглядела бы используемой. При 70% совпадения отчётов между сетями
+-- общий счёт занижает «не используются» примерно вдвое.
 CREATE VIEW v_tables_catalog AS
 SELECT
     s.network,
@@ -412,7 +427,13 @@ SELECT
     s.segment_count,
     s.measured_at,
     (SELECT COUNT(DISTINCT b.report_id) FROM bridge_report_table b
-     WHERE b.table_id = t.table_id) AS report_count
+     WHERE b.table_id = t.table_id) AS report_count,
+    (SELECT COUNT(DISTINCT b.report_id)
+     FROM bridge_report_table b
+     JOIN dim_report r ON r.report_id = b.report_id
+     WHERE b.table_id = t.table_id
+       AND r.network IS NOT DISTINCT FROM s.network
+       AND r.plant   IS NOT DISTINCT FROM s.plant) AS rc_report_count
 FROM fact_table_size s
 JOIN dim_table t ON t.table_id = s.table_id;
 

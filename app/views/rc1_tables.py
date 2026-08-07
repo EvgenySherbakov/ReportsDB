@@ -38,18 +38,32 @@ if plant != ALL:
     view = view[view["plant"] == plant]
 usage = f3.selectbox(
     "Связь с отчётами", [ALL, "Только используемые", "Только неиспользуемые"],
-    help="Список таблиц не зависит от отчётов; фильтр — справочный.",
+    help="Считаются отчёты выбранного РЦ: таблица, к которой тянется отчёт "
+         "соседнего завода, здесь лежит без дела. Список таблиц не зависит от "
+         "отчётов; фильтр — справочный.",
+)
+# Неиспользуемость определяется по ВЫБОРКЕ, а не по строке: таблица есть на
+# каждом заводе, и «не используется» означает «ни один отчёт выбранных РЦ её не
+# касается». Счёт по строке ответил бы на другой вопрос — «не используется хотя
+# бы на одном заводе», — и при выборе всех заводов завысил бы показатель.
+used_anywhere = set(
+    view.loc[view["rc_report_count"] > 0, "full_name"].unique()
 )
 if usage == "Только используемые":
-    view = view[view["report_count"] > 0]
+    view = view[view["full_name"].isin(used_anywhere)]
 elif usage == "Только неиспользуемые":
-    view = view[view["report_count"] == 0]
+    view = view[~view["full_name"].isin(used_anywhere)]
 
 view = search_box(view, ["full_name", "schema_name", "table_name"],
                   "Поиск по наименованию таблицы", key="s_rc1")
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("Строк «таблица + завод»", len(view))
+k1.metric(
+    "Всего загружено таблиц", len(view),
+    help="Строка на пару «таблица + завод»: одна и та же таблица загружена по "
+         "разу на каждый завод, где её замерили, и весит там своё. Сколько это "
+         "разных таблиц — в показателе рядом.",
+)
 k2.metric("Уникальных таблиц", view["full_name"].nunique())
 k3.metric(
     "Суммарный объём, МБ",
@@ -61,9 +75,12 @@ k3.metric(
 k4.metric(
     # Считаем именно таблицы, а не строки: одна таблица даёт строку на каждый
     # завод, и счёт по строкам завысил бы показатель в несколько раз.
-    "Не используются отчётами", view.loc[view["report_count"] == 0, "full_name"].nunique(),
-    help="Таблицы есть в файле размеров, но ни один отчёт на них не ссылается. "
-         "Счёт по таблицам, а не по строкам «таблица + завод».",
+    "Не используются отчётами",
+    view.loc[~view["full_name"].isin(used_anywhere), "full_name"].nunique(),
+    help="Таблицы есть в файле размеров, но ни один отчёт ВЫБРАННЫХ РЦ на них "
+         "не ссылается. Отчёты соседних заводов не считаются: на этом заводе "
+         "такая таблица всё равно лежит без дела. Счёт по таблицам, а не по "
+         "строкам «таблица + завод».",
 )
 
 if view["total_mb"].notna().any():
@@ -75,7 +92,8 @@ if view["total_mb"].notna().any():
     fig = px.bar(
         top, x="total_mb", y=label, orientation="h",
         labels={"total_mb": "Объём, МБ", label: ""},
-        hover_data=["network", "plant", "object_kind", "retention_days", "report_count"],
+        hover_data=["network", "plant", "object_kind", "retention_days",
+                    "rc_report_count", "report_count"],
         color_discrete_sequence=[ACCENT],
     )
     fig.update_layout(
@@ -92,15 +110,19 @@ shown = show_table(
         "total_mb": st.column_config.NumberColumn("Объём, МБ", format="%.1f"),
         "percent_of_total": st.column_config.NumberColumn("Доля БД, %", format="%.3f"),
         "retention_days": st.column_config.NumberColumn("Глубина, дней"),
-        "report_count": st.column_config.NumberColumn("Отчётов"),
+        "rc_report_count": st.column_config.NumberColumn("Отчётов завода"),
+        "report_count": st.column_config.NumberColumn("Отчётов всего"),
         "measured_at": "Дата замера",
     },
 )
 download(shown, "tables_catalog.csv")
 
 st.caption(
-    "Колонка «Отчётов» — справочная: показывает, сколько отчётов ссылается на "
-    "таблицу. Связь отчётов с таблицами разбирается в таблице №2."
+    "Колонки «Отчётов» — справочные. «Отчётов завода» — сколько отчётов этого "
+    "же РЦ ссылается на таблицу; именно по ней считается «не используются». "
+    "«Отчётов всего» — по всей базе: ноль в первой колонке и не ноль во второй "
+    "означает, что таблицу держат ради отчёта другого завода. Связь отчётов с "
+    "таблицами разбирается в таблице №2."
 )
 
 # Ссылки отчётов на объекты вне файла размеров в список не добавляются, но

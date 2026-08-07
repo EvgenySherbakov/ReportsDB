@@ -92,6 +92,46 @@ button[data-testid^="stBaseButton"] {
 
 hr { opacity: 0.4; }
 
+/* Вкладки. По умолчанию Streamlit рисует их почти как обычный текст: активная
+   отличается тонкой чертой снизу, неактивная не отличается ничем, и заказчик
+   не догадывался, что на №2 «По отчётам» и «По таблицам» вообще переключаются.
+   Здесь неактивная вкладка — заметная кнопка на подложке, активная залита
+   акцентом и подчёркнута толстой чертой: видно и то, что это переключатель, и
+   то, какая половина открыта сейчас. Цветом ничего не держится в одиночку —
+   разница читается ещё и заливкой, весом шрифта и чертой. */
+div[data-testid="stTabs"] div[role="tablist"] {
+    gap: 0.4rem;
+    background: rgba(127, 127, 127, 0.07);
+    border: 1px solid rgba(127, 127, 127, 0.14);
+    border-radius: 10px;
+    padding: 0.3rem;
+    margin-bottom: 0.5rem;
+    /* Родную черту-подсветку под вкладками убираем: её роль взяла заливка. */
+    border-bottom: 1px solid rgba(127, 127, 127, 0.14);
+}
+div[data-testid="stTab"] {
+    border-radius: 8px;
+    padding: 0.3rem 1.05rem !important;
+    border-bottom: 3px solid transparent !important;
+    transition: background-color 120ms ease;
+}
+div[data-testid="stTab"] p {
+    font-size: 0.94rem !important;
+    font-weight: 600;
+    opacity: 0.72;
+}
+div[data-testid="stTab"]:hover { background: rgba(127, 127, 127, 0.12); }
+div[data-testid="stTab"][aria-selected="true"] {
+    background: rgba(57, 135, 229, 0.16);
+    border-bottom-color: #3987e5 !important;
+}
+div[data-testid="stTab"][aria-selected="true"] p { opacity: 1; font-weight: 700; }
+/* Подчёркивание активной вкладки Streamlit рисует отдельным элементом внутри
+   списка — оно дублировало бы нашу черту. */
+div[data-testid="stTabs"] div[role="tablist"] > div:not([data-testid="stTab"]) {
+    display: none;
+}
+
 [data-testid="stNavSectionHeader"] p {
     font-size: 0.72rem;
     text-transform: uppercase;

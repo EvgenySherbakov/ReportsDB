@@ -88,8 +88,10 @@ with d1:
     volume = query(
         f"""
         SELECT
-            CASE WHEN report_count = 0 THEN 'Не используются'
-                 WHEN report_count = 1 THEN 'Один отчёт'
+            -- Счёт по отчётам своего РЦ, как в таблице №1: отчёт соседнего
+            -- завода не делает таблицу используемой на этом.
+            CASE WHEN rc_report_count = 0 THEN 'Не используются'
+                 WHEN rc_report_count = 1 THEN 'Один отчёт'
                  ELSE 'Несколько отчётов' END AS grp,
             ROUND(SUM(total_mb), 1) AS mb
         FROM v_tables_catalog

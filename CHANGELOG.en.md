@@ -43,7 +43,7 @@ file records only what a user can see.
   Matching is precise — "network + plant + catalog + name" — so a namesake report
   on a neighbouring plant keeps its own query. If ТС and Завод are absent from the
   file, the text lands on every report sharing that name.
-- **Database queries** — a new page in the "Tools" section: the query text per
+- **Database queries from SSRS** — a new page in the "Tools" section: the query text per
   report, with syntax highlighting and a `.sql` export. **Search covers the query
   text**, which is how reports touching a table missing from the "source tables"
   column are found. Tiles: reports with a query, their share, the median and
@@ -53,9 +53,20 @@ file records only what a user can see.
 
 ### Changed
 
+- **№1 "Tables and sizes": the "table + plant rows" metric is now called
+  "tables loaded in total".** What it counts is in the tooltip beside it: a row
+  per "table + plant" pair, with the number of distinct tables in the next
+  metric.
+- **Tabs are now visible.** "By reports" / "By tables" on №2 (and every other
+  tab in the app) differed only by a thin line under the active one — there was
+  no telling it was a switch. It is now an obvious switch: a backing around the
+  pair, with the active half filled with colour and underlined.
+- "Database queries" was renamed to **"Database queries from SSRS"** — in the
+  app and in the colleague file alike.
+
 - **The colleague HTML file is now complete: it holds every page of the app.**
   Added "Unique reports" (with both comparison scopes and the threshold slider),
-  "Database queries" (the SQL text per report, with search over the query text)
+  "Database queries from SSRS" (the SQL text per report, with search over the query text)
   and "Networks and plants" (tiles, the "under reports / without reports" stack,
   and the DC comparison moved over from "Overview"). The match with the app is now
   pinned by a test — a new page cannot appear in the app while being absent from
@@ -74,6 +85,20 @@ file records only what a user can see.
   execution and duration figures will stay empty.
 
 ### Fixed
+
+- **"Not used by any report" in №1 was counted across the whole base rather
+  than the selected DC, understating the answer roughly twofold.** A table is
+  entered as a separate row per plant, while reports were counted base-wide: a
+  table reached by a neighbouring plant's report looked used on this plant too,
+  though it lies idle there. At 70% report overlap between networks nearly
+  everything came out "used". The count now uses the reports of its own DC, and
+  so do the "Only unused" filter and the volume pie on the Overview. The table
+  has two columns, "Plant's reports" and "Reports in total"; zero in the first
+  and non-zero in the second means the table is kept for another plant's report.
+  The same fix applies to the DC comparison on "Networks and plants" — "under
+  reports" and its share were counted just as blindly there, and the two pages
+  disagreed. **The numbers will change after the update** — they will start
+  answering the question actually asked.
 
 - **The app crashed with a full-screen error** when the database was opened
   while another process held it — for example, a load or a clear running in a

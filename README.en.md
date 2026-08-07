@@ -270,7 +270,7 @@ plainly how many such reports there are and why.
 
 ### Database queries
 
-The **"Запросы к БД"** ("Database queries", the "Tools" section) page shows the
+The **"Запросы к БД из SSRS"** ("Database queries", the "Tools" section) page shows the
 SQL text a report is built from — loaded from a separate SQL query file. The
 question runs the other way round compared with the report card: **search covers
 the query text**, so "which reports touch this table" is answered right here —

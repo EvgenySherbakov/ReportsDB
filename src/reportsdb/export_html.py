@@ -47,7 +47,7 @@ QUERIES = {
                c.exec_count, c.avg_duration_sec, c.total_duration_sec, c.quadrant,
                s.view_count, s.matview_count, s.temp_count, s.routine_count,
                s.retention_days, s.table_names,
-               -- Текст запроса едет в файл целиком: страница «Запросы к БД» без
+               -- Текст запроса едет в файл целиком: страница «Запросы к БД из SSRS» без
                -- него пуста, а обрезать значило бы показать неполный SQL, по
                -- которому нельзя судить о запросе. На размер влияет заметно,
                -- поэтому страница сборки честно показывает вес файла.
@@ -78,7 +78,7 @@ QUERIES = {
     "sizes": """
         SELECT network, plant, full_name, schema_name, object_kind,
                total_mb, percent_of_total, row_count, retention_days,
-               segment_count, report_count
+               segment_count, report_count, rc_report_count
         FROM v_tables_catalog
         ORDER BY total_mb DESC NULLS LAST
     """,

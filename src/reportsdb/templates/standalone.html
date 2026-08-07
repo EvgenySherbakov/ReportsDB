@@ -545,7 +545,7 @@
 
 <!-- ===================== Инструменты ==================== -->
 <section data-tab="reportsql" hidden>
-  <h2>Запросы к БД</h2>
+  <h2>Запросы к БД из SSRS</h2>
   <p class="hint">Текст запроса, которым формируется отчёт. <b>Поиск работает и
   по тексту запроса</b> — так видно обращения к таблице, которых нет в колонке
   «Таблицы источники данных» исходного файла: например, через <code>JOIN</code>
@@ -914,6 +914,14 @@ function tiles(hostId, items) {
 const sumOf = (rows, key) => rows.reduce((s, r) => s + (r[key] || 0), 0);
 const hasAny = (rows, key) => rows.some(r => r[key] !== null && r[key] !== undefined);
 const uniqOf = (rows, key) => new Set(rows.map(r => r[key])).size;
+// Таблицы, которых не касается ни один отчёт ВЫБОРКИ. Определяется по выборке,
+// а не по строке: таблица есть на каждом заводе, и счёт по строке ответил бы на
+// другой вопрос — «не используется хотя бы на одном заводе».
+const unusedTables = rows => {
+  const used = new Set();
+  rows.forEach(r => { if (r.rc_report_count) used.add(r.full_name); });
+  return new Set(rows.filter(r => !used.has(r.full_name)).map(r => r.full_name)).size;
+};
 const countOf = (rows, fn) => rows.filter(fn).length;
 function medianOf(rows, key) {
   const v = rows.map(r => r[key]).filter(x => x !== null && x !== undefined)
@@ -966,7 +974,8 @@ const SIZE_COLS = [
   {key: 'row_count', label: 'Строк', num: true},
   {key: 'retention_days', label: 'Глубина, дней', num: true},
   {key: 'segment_count', label: 'Сегментов', num: true},
-  {key: 'report_count', label: 'Отчётов', num: true},
+  {key: 'rc_report_count', label: 'Отчётов завода', num: true},
+  {key: 'report_count', label: 'Отчётов всего', num: true},
 ];
 const RC2_COLS = [
   {key: 'report_name', label: 'Отчёт', wide: true},
@@ -1418,12 +1427,13 @@ makeTable({name: 'sizes', el: 't-sizes', rows: DATA.sizes, cols: SIZE_COLS,
   filter: document.getElementById('f-sizes'), filterField: 'schema_name',
   filterLabel: 'Все схемы',
   onRender: d => tiles('m-sizes', [
-    ['Строк «таблица + завод»', fmt(d.length)],
+    ['Всего загружено таблиц', fmt(d.length)],
     ['Уникальных таблиц', fmt(uniqOf(d, 'full_name'))],
     ['Суммарный объём, МБ', hasAny(d, 'total_mb') ? fmtInt(sumOf(d, 'total_mb')) : '—'],
     // Считаем таблицы, а не строки: одна таблица даёт строку на каждый завод.
-    ['Не используются отчётами',
-     fmt(uniqOf(d.filter(r => !r.report_count), 'full_name'))],
+    // Используемость — по отчётам своего РЦ и по всей выборке сразу: таблица,
+    // которую держат ради отчёта соседнего завода, здесь лежит без дела.
+    ['Не используются отчётами', fmt(unusedTables(d))],
   ])});
 makeTable({name: 'rc2rep', el: 't-rc2rep', rowsFn: rc2ByReports, cols: RC2REP_COLS,
   search: document.getElementById('q-rc2rep'), count: 'c-rc2rep',
@@ -1692,7 +1702,7 @@ makeTable({
 makeTable({name: 'usummary', el: 't-usummary', rowsFn: uniqueSummary,
   cols: USUMMARY_COLS});
 
-/* --- Запросы к БД -------------------------------------------------------- */
+/* --- Запросы к БД из SSRS -------------------------------------------------------- */
 // Текст запроса приезжает в файл вместе с отчётами, поэтому отдельного набора
 // данных не нужно. Строк в запросе считаем здесь: в файле их хранить незачем.
 const sqlAll = document.getElementById('f-sqlall');
@@ -1836,7 +1846,7 @@ const TABS = [
     ['unique', 'Уникальные отчёты'], ['abc', 'ABC-анализ'],
   ]],
   ['Справочники', [['tables', 'Таблицы'], ['networks', 'Сети и заводы']]],
-  ['Инструменты', [['reportsql', 'Запросы к БД']]],
+  ['Инструменты', [['reportsql', 'Запросы к БД из SSRS']]],
 ];
 const nav = document.getElementById('tabs');
 nav.innerHTML = TABS.map(([group, items]) =>
