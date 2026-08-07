@@ -550,35 +550,48 @@ def test_usage_file_matches_by_network_and_plant_without_catalog_path(tmp_path_f
     )
 
 
-def test_report_sql_text_is_broadcast_by_name(tmp_path_factory):
-    """Текст SQL-запроса применяется ко всем отчётам с этим именем.
+def test_report_sql_matches_each_plant_separately(tmp_path_factory):
+    """Файл с ТС и Заводом сопоставляется точно, по строке на отчёт-запись.
 
-    В отличие от статистики использования, файл SQL-запросов не несёт ТС и
-    Завод — запрос описывает определение отчёта, а не конкретную площадку.
-    Поэтому один и тот же отчёт на нескольких заводах обязан получить один и
-    тот же текст, а не остаться пустым из-за «неоднозначного» имени.
+    Так его выгружает заказчик: №, ТС, Завод, три уровня каталога, наименование
+    и запрос. Одно и то же имя отчёта заведено на разных заводах, и у каждого
+    там свой запрос — размазать один текст по всем тёзкам значило бы показать
+    в карточке чужой SQL.
     """
     import pandas as pd
 
     reports = pd.DataFrame(
         [
             {"№": 1, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Каталог 1-го уровня": "Финансы",
              "Наименование отчета": "Общий отчёт",
              "Таблицы источники данных": "dbo.T1"},
             {"№": 2, "ТС": "СЕТЬ-1", "Завод": "Завод-Б",
+             "Каталог 1-го уровня": "Финансы",
              "Наименование отчета": "Общий отчёт",
              "Таблицы источники данных": "dbo.T2"},
             {"№": 3, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Каталог 1-го уровня": "Продажи",
              "Наименование отчета": "Свой отчёт",
              "Таблицы источники данных": "dbo.T3"},
         ]
     )
+    # Строка на Завод-Б намеренно без каталога: проверяется второй уровень
+    # сопоставления «ТС + Завод + имя».
     sql = pd.DataFrame(
         [
-            {"Наименование отчета": "Общий отчёт",
-             "Запрос к базе данных": "SELECT 1 FROM dual"},
-            {"Наименование отчета": "Отчёт без пары",
-             "Запрос к базе данных": "SELECT 2 FROM dual"},
+            {"№": 1, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Каталог 1-го уровня": "Финансы",
+             "Наименование отчета": "Общий отчёт",
+             "Запрос к базе данных": "SELECT 1 FROM dbo.T1"},
+            {"№": 2, "ТС": "СЕТЬ-1", "Завод": "Завод-Б",
+             "Каталог 1-го уровня": "",
+             "Наименование отчета": "Общий отчёт",
+             "Запрос к базе данных": "SELECT 2 FROM dbo.T2"},
+            {"№": 3, "ТС": "СЕТЬ-1", "Завод": "Завод-В",
+             "Каталог 1-го уровня": "Финансы",
+             "Наименование отчета": "Отчёт без пары",
+             "Запрос к базе данных": "SELECT 3"},
         ]
     )
     src_dir = tmp_path_factory.mktemp("sql_text")
@@ -598,8 +611,11 @@ def test_report_sql_text_is_broadcast_by_name(tmp_path_factory):
     db = tmp_path_factory.mktemp("sql_text_db") / "db.duckdb"
     stats = build(reports_path, db, mapping)
 
-    assert stats.sql_loaded == 2, "текст обязан лечь на оба завода «Общего отчёта»"
-    assert stats.sql_unmatched == ["Отчёт без пары"]
+    assert stats.sql_loaded == 2
+    assert stats.sql_unmatched == ["Отчёт без пары"], (
+        "строка про завод, которого нет в каталоге отчётов, не должна "
+        "сопоставляться с тёзкой на другом заводе"
+    )
 
     con = duckdb.connect(str(db), read_only=True)
     rows = con.execute(
@@ -607,10 +623,62 @@ def test_report_sql_text_is_broadcast_by_name(tmp_path_factory):
     ).fetchall()
     con.close()
     assert rows == [
-        ("Общий отчёт", "Завод-А", "SELECT 1 FROM dual"),
-        ("Общий отчёт", "Завод-Б", "SELECT 1 FROM dual"),
+        ("Общий отчёт", "Завод-А", "SELECT 1 FROM dbo.T1"),
+        ("Общий отчёт", "Завод-Б", "SELECT 2 FROM dbo.T2"),
         ("Свой отчёт", "Завод-А", None),
     ]
+
+
+def test_report_sql_without_plant_columns_is_broadcast_by_name(tmp_path_factory):
+    """Файл без ТС и Завода раздаёт текст всем отчётам с этим именем.
+
+    Запрос описывает определение отчёта, а не площадку: если организационного
+    разреза в файле нет, единственное осмысленное поведение — применить текст ко
+    всем тёзкам, а не оставить их пустыми из-за неоднозначности.
+    """
+    import pandas as pd
+
+    reports = pd.DataFrame(
+        [
+            {"№": 1, "ТС": "СЕТЬ-1", "Завод": "Завод-А",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T1"},
+            {"№": 2, "ТС": "СЕТЬ-1", "Завод": "Завод-Б",
+             "Наименование отчета": "Общий отчёт",
+             "Таблицы источники данных": "dbo.T2"},
+        ]
+    )
+    sql = pd.DataFrame(
+        [{"Наименование отчета": "Общий отчёт",
+          "Запрос к базе данных": "SELECT 1 FROM dual"}]
+    )
+    src_dir = tmp_path_factory.mktemp("sql_noplant")
+    reports_path = src_dir / "reports.xlsx"
+    sql_path = src_dir / "sql.xlsx"
+    reports.to_excel(reports_path, index=False)
+    sql.to_excel(sql_path, index=False)
+
+    base = load_mapping()
+    mapping = Mapping(
+        reports=base.reports,
+        table_sizes=SectionConfig(),
+        report_usage=SectionConfig(),
+        report_sql=base.report_sql,
+    )
+    mapping.report_sql.file = str(sql_path)
+    db = tmp_path_factory.mktemp("sql_noplant_db") / "db.duckdb"
+    stats = build(reports_path, db, mapping)
+
+    assert stats.sql_loaded == 2, "текст обязан лечь на оба завода"
+    assert stats.sql_unmatched == []
+
+    con = duckdb.connect(str(db), read_only=True)
+    texts = [r[0] for r in con.execute(
+        "SELECT sql_text FROM dim_report ORDER BY report_id"
+    ).fetchall()]
+    con.close()
+    assert texts == ["SELECT 1 FROM dual", "SELECT 1 FROM dual"]
+
 
 
 def test_duration_is_seconds_not_milliseconds(full_db):

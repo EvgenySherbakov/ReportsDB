@@ -297,7 +297,7 @@ Formats: `.xlsx`, `.xls`, `.xlsm`, `.csv`, `.tsv`.
 | **Reports** | Required. One row per report: number, network, plant, three catalog levels, name, "uses a view" flag, source tables. Execution count and average duration are **not read** from this file, even where the columns physically exist |
 | **Table sizes** | If available. A database segment export: `ТС`, `Завод`, `OWNER`, `SEGMENT_NAME`, `SEGMENT_TYPE`, `SIZE_MB`, `PERCENT_OF_TOTAL`, `Глубина хранения`. `ТС` and `Завод` are optional, but without them a size is treated as common to all plants, whereas in reality each plant has its own |
 | **Statistics as a separate file** | The only source of execution count and average duration: `Наименование отчёта`, `ТС`, `Завод`, `Кол-во обращений`, `Ср. дл. (сек)`. Without this role executions and duration stay empty, even if such columns are visible in the reports file |
-| **SQL queries** | Optional. `Наименование отчёта` and the query text, with no ТС or Завод — matching is by name only, and the text is applied to every plant sharing that name. Shown on its own tab of the report card |
+| **SQL queries** | Optional. Structure mirrors the reports file: `№`, `ТС`, `Завод`, `Каталог 1/2/3-го уровня`, `Наименование отчета`, `Запрос к базе данных`. Matching is precise — a namesake report on a neighbouring plant keeps its own query. If ТС and Завод are absent, the text lands on every report sharing that name. Shown under **Tools → Database queries** and on a tab of the report card |
 
 The sizes file may be missing — load it later when it appears. The analytics
 works without it, the volume columns will simply be empty.

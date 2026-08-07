@@ -750,13 +750,21 @@ def _load_report_usage(
 def _load_report_sql(
     con: duckdb.DuckDBPyConnection, section: SectionConfig, stats: LoadStats
 ) -> None:
-    """Текст SQL-запроса отчёта — необязательный файл, сопоставление по имени.
+    """Текст SQL-запроса отчёта — необязательный файл.
 
-    В отличие от статистики использования, здесь нет ТС и Завода: запрос —
-    свойство определения отчёта, а не конкретной площадки. Поэтому текст
-    применяется сразу ко ВСЕМ отчётам с этим именем — тот же отчёт на трёх
-    заводах получает один и тот же запрос, а не остаётся пустым из-за
-    неоднозначности, как было бы при сопоставлении статистики.
+    Структура повторяет файл отчётов: ТС, Завод, три уровня каталога,
+    наименование — плюс сам запрос. Сопоставление идёт по трём уровням, от
+    точного к грубому, как у статистики использования:
+
+    1. `(сеть, завод, каталог, имя)` — полный ключ `dim_report`;
+    2. `(сеть, завод, имя)` — для файлов, где каталога нет;
+    3. одно имя — **и здесь правило отличается от статистики**. Если в файле
+       нет колонок ТС и Завода вовсе, текст применяется ко ВСЕМ отчётам с этим
+       именем: запрос описывает определение отчёта, а не площадку, и общий
+       текст для отчёта-тёзки на соседнем заводе — не ошибка, а точный смысл
+       данных. Если ТС с Заводом в файле есть, но строка ими не сопоставилась,
+       имя годится только когда оно единственное в базе — иначе запрос ушёл бы
+       на чужой завод.
     """
     paths = _section_files(section)
     if not paths:
@@ -769,31 +777,72 @@ def _load_report_sql(
     if not cols.get("sql_text"):
         raise SystemExit("В файле SQL-запросов нет колонки с текстом запроса.")
 
+    # Есть ли в файле организационный разрез. От этого зависит правило
+    # последнего уровня: без него имя раздаётся всем тёзкам, с ним — только
+    # однозначное.
+    has_rc = bool(cols.get("network")) and bool(cols.get("plant"))
+    level_cols = [cols.get("folder_l1"), cols.get("folder_l2"), cols.get("folder_l3")]
+    use_levels = any(level_cols)
+
+    rows_db = con.execute(
+        "SELECT report_id, report_name, catalog_path, network, plant FROM dim_report"
+    ).fetchall()
+    by_full = {
+        (_low(net), _low(pl), _low(p), _low(n)): rid
+        for rid, n, p, net, pl in rows_db
+    }
+    by_net_plant: dict[tuple[str, str, str], list[int]] = {}
+    for rid, n, _, net, pl in rows_db:
+        by_net_plant.setdefault((_low(net), _low(pl), _low(n)), []).append(rid)
     by_name: dict[str, list[int]] = {}
-    for rid, name in con.execute(
-        "SELECT report_id, report_name FROM dim_report"
-    ).fetchall():
+    for rid, name, _, _, _ in rows_db:
         by_name.setdefault(_low(name), []).append(rid)
 
-    updates: list[tuple] = []
-    seen_report_ids: set[int] = set()
+    updates: dict[int, str] = {}
     for _, row in df.iterrows():
         name = clean_text(_cell(row, cols["report_name"]))
         text = clean_text(_cell(row, cols["sql_text"]))
         if name is None or text is None:
             continue
-        candidates = by_name.get(_low(name), [])
-        if not candidates:
+
+        if use_levels:
+            path = join_folders(*(_cell(row, c) for c in level_cols))
+        else:
+            raw_path = clean_text(_cell(row, cols.get("catalog_path")))
+            path = normalise_catalog_path(raw_path) if raw_path else None
+        network = clean_text(_cell(row, cols.get("network")))
+        plant = clean_text(_cell(row, cols.get("plant")))
+
+        matched: list[int] = []
+        if path is not None:
+            rid = by_full.get((_low(network), _low(plant), _low(path), _low(name)))
+            if rid is not None:
+                matched = [rid]
+        if not matched and network is not None and plant is not None:
+            candidates = by_net_plant.get(
+                (_low(network), _low(plant), _low(name)), []
+            )
+            # Неоднозначно даже внутри одного завода — угадывать нельзя.
+            matched = candidates if len(candidates) == 1 else []
+        if not matched:
+            candidates = by_name.get(_low(name), [])
+            if not has_rc:
+                matched = candidates          # раздаём всем тёзкам, см. docstring
+            elif len(candidates) == 1:
+                matched = candidates
+        if not matched:
             stats.sql_unmatched.append(name)
             continue
-        for rid in candidates:
-            if rid in seen_report_ids:
-                continue
-            seen_report_ids.add(rid)
-            updates.append((text, rid))
+
+        # dict, а не список: одна строка файла может лечь на несколько отчётов,
+        # а разные строки — претендовать на один и тот же report_id. Побеждает
+        # последняя, как и при обычной перезаписи.
+        for rid in matched:
+            updates[rid] = text
 
     con.executemany(
-        "UPDATE dim_report SET sql_text = ? WHERE report_id = ?", updates
+        "UPDATE dim_report SET sql_text = ? WHERE report_id = ?",
+        [(text, rid) for rid, text in updates.items()],
     )
     stats.sql_loaded = len(updates)
 

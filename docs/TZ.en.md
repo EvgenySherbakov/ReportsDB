@@ -133,13 +133,28 @@ for files without a "Каталог" (catalog path) column — the usual shape o
 usage export: without it the same report name on different plants made matching
 ambiguous, and the row was simply dropped.
 
-**A report's SQL query text is also a separate, optional file**
-(`report_sql`): report name and query text, with no ТС or Завод. Matching is by
-name only, and the text found is **applied to every report sharing that name**:
-a query is a property of the report's definition, not of a specific plant, and
-the same report on three plants must get the same text rather than get lost to
-"ambiguity" the way usage statistics would. Shown on the report card, on its own
-tab; stored in `dim_report.sql_text`. `SCHEMA_VERSION` was raised to 13.
+**A report's SQL query text is also a separate, optional file** (`report_sql`).
+Its structure mirrors the reports file — that is how the customer exports it:
+
+| Header in the file | Model field |
+| --- | --- |
+| `№`, `ТС`, `Завод` | used for matching; `report_no` is not taken from here |
+| `Каталог 1/2/3-го уровня` | the path is assembled as in the reports file |
+| `Наименование отчета` | `report_name` |
+| `Запрос к базе данных` | `sql_text` |
+
+Matching goes through three tiers, from precise to coarse: `(network, plant,
+catalog, name)` → `(network, plant, name)` → a bare name. **The third tier
+differs from usage statistics:** if the file has no ТС and Завод columns at all,
+the text is applied to **every** report sharing that name — a query describes the
+report's definition rather than a site, and a shared text for a namesake on a
+neighbouring plant is not a mistake but the exact meaning of the data. If ТС and
+Завод are present but the row did not match through them, a bare name is only
+accepted when it is unique across the database: otherwise the query would land on
+a foreign plant that has its own.
+
+Stored in `dim_report.sql_text` (`SCHEMA_VERSION` was raised to 13). Shown on the
+"Tools → Database queries" page (see 5.1) and on its own tab of the report card.
 
 ### 3.1.1. Data never leaves the machine
 
@@ -785,7 +800,22 @@ Pages:
    enter the network and plant counters: that is not a network and not a plant,
    it is an unfilled column.
 
-   5.1. **File for colleagues** (the "Tools" section) — building the
+   5.1. **Database queries** (the "Tools" section) — the SQL text a report is
+   built from. A separate page rather than only a tab on the report card, because
+   the question runs the other way: the card answers "everything about this
+   report", while here one searches **by the query text**. Search covers
+   `sql_text` too, so "which reports touch this table" is answered here even for
+   tables that never made it into the "source tables" column. Tiles: reports with
+   a query, their share, the median and maximum number of lines in a query (the
+   median rather than the mean — one thousand-line query would skew the mean).
+   Clicking a report shows the query with syntax highlighting, a `.sql` export,
+   and **the declared sources next to it**, flagged "present in the query": the
+   discrepancy between the file's source list and the query text is exactly what
+   this page helps notice. Comparison also matches the name without its schema,
+   because queries write tables both ways; a "no" can be legitimate — the object
+   may arrive through a view or a routine.
+
+   5.2. **File for colleagues** (the "Tools" section) — building the
    self-contained HTML. A separate page rather than a block at the bottom of the
    loader: the file is not built at the same moment the data is loaded, and on
    the load page it also ended up behind an `st.stop()` and simply did not
@@ -1025,3 +1055,6 @@ versions in the same commit.
 | 2026-08-06 | **Usage statistics — a separate file only, and SQL query text was added.** The customer corrected the previous entry's decision: the `Кол-во обращений` and `Ср. дл. (сек)` columns physically remain in the main reports file (an older export format nobody is going to change), but they may no longer be read from there — the sole source of usage statistics is now the `report_usage` file. Reason: the main file is sent less often than statistics change, its numbers go stale, and stale data risks silently passing for current. Reading of `exec_count`/`avg_duration_sec`/`avg_duration_ms` was removed from `reports.columns` (`config/mapping.yml` and `config/mapping.sample.yml`), along with the whole insert into `fact_report_usage` inside `_load_reports` — a missing column used to be silently backfilled empty, now the column is not read at all, so there is nothing to backfill. The `INSERT OR REPLACE` comment in `_load_report_usage` was simplified too: it used to explain overriding the main file's values, which no longer exist, and REPLACE now stays purely as a guard against a primary-key conflict on repeated matching. The demo `sample_reports.xlsx` deliberately kept these columns filled: that is exactly the check that they are truly ignored, not merely absent.
 
 The second half is a new `report_sql` file: report name and SQL query text, shown on its own tab of the report card. The file has no ТС or Завод — a query describes the report's definition, not a specific site — so matching is by name only, and the text found is **applied to every `report_id` sharing that name**, not to a single "most likely" one. That is a deliberately different rule from usage statistics: there an ambiguous name is a reason to give up (the data would land on the wrong report), while here applying the same query to a namesake report on another plant is not a mistake — it is the exact meaning of the data. `dim_report` gained a `sql_text` column (`SCHEMA_VERSION` raised to 13); `_load_report_sql` writes it through `UPDATE ... WHERE report_id = ?` after `_load_reports` has already inserted the rows — a separate pass, not a view: `sql_text` is read on the report card by a direct query against `dim_report`, with no intermediate view, the same way `description`/`owner` are. Names from the file with no match are collected into `stats.sql_unmatched`, mirroring usage statistics. The self-contained HTML export does not carry the query tab yet — its report card lives in a JS template, not Python, and porting it is a separately sized piece of work. |
+| 2026-08-06 | **The SQL query file mirrors the reports file's structure, and queries got their own page.** The customer showed the actual format: `№`, `ТС`, `Завод`, `Каталог 1/2/3-го уровня`, `Наименование отчета`, `Запрос к базе данных` — the file does carry an organisational breakdown, which the previous entry did not assume. That changes the matching rule for the better: instead of "hand the text to every namesake", three tiers now work, as with usage statistics — `(network, plant, catalog, name)` → `(network, plant, name)` → a bare name. The path is assembled from the three levels by the same `join_folders` used for the reports file. The former behaviour is kept as the branch for files **without** ТС and Завод: there a name still goes to every namesake, because a query describes the report's definition rather than a site. But if ТС and Завод are present and the row failed to match through them, a bare name is only accepted when it is unique across the database: otherwise the query would land on a foreign plant that has its own. Both rules are pinned by separate tests. The demo data was updated: `sample_report_sql.xlsx` now carries ТС, Завод and the catalog, and the query mentions the report's first table — on such a row it is visible that searching by query text really does find reports by a table name.
+
+The second half is the **"Tools → Database queries"** page (`report_sql.py`). A separate page rather than only a card tab: the card answers "everything about this report", while here the order is reversed — searching **by the query text**, with `sql_text` included in the search. That answers "which reports touch this table" for tables that never made it into the "source tables" column: access through a `JOIN` inside a subquery is invisible in the source list altogether. Below the query, the report's declared sources are shown flagged "present in the query" — the discrepancy between the file's list and the text is exactly what the page helps notice; comparison also matches the name without its schema, because queries write tables both ways, and a "no" can be legitimate (the object arrives through a view or a routine). The median number of lines per query rather than the mean: one thousand-line query would skew the mean. `SCHEMA_VERSION` was not raised — the `sql_text` column arrived in the previous change; here only the mapping, the ETL and the interface changed. |

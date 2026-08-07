@@ -61,8 +61,9 @@ The mapping is configured for the actual headers — no config editing needed:
   (retention days);
 - **statistics file** (required for executions and duration):
   `Наименование отчета`, `ТС`, `Завод`, `Кол-во обращений`, `Ср. дл. (сек)`;
-- **SQL query file** (optional): `Наименование отчета`, the query text —
-  shown on the report card.
+- **SQL query file** (optional): `№`, `ТС`, `Завод`,
+  `Каталог 1/2/3-го уровня`, `Наименование отчета`, `Запрос к базе данных` —
+  shown under "Tools → Database queries" and on the report card.
 
 The object kind comes from the column the object is listed in. If there are no
 per-kind columns, a name mask from `config/mapping.yml` applies — one is enabled
@@ -263,6 +264,22 @@ There are four measures, and they answer different questions:
 
 A report with a zero measure does not enter the analysis — the page states
 plainly how many such reports there are and why.
+
+### Database queries
+
+The **"Запросы к БД"** ("Database queries", the "Tools" section) page shows the
+SQL text a report is built from — loaded from a separate SQL query file. The
+question runs the other way round compared with the report card: **search covers
+the query text**, so "which reports touch this table" is answered right here —
+including tables that never made it into the "source tables" column of the
+original file.
+
+Clicking a report shows the query with syntax highlighting, a `.sql` export, and
+next to it **the report's declared sources** flagged "present in the query". Any
+discrepancy between the file's source list and the query text is visible at once:
+if the query holds a table missing from the list, the report's volume is
+understated. A "no" can also be legitimate — the object may arrive through a view
+or a routine.
 
 ### About `gross_mb` and `exclusive_mb` — important
 

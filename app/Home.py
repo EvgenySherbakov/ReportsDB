@@ -42,6 +42,7 @@ NAV = {
         st.Page("views/networks.py", title="Сети и заводы", icon="🏭"),
     ],
     "Инструменты": [
+        st.Page("views/report_sql.py", title="Запросы к БД", icon="🧾"),
         st.Page("views/export.py", title="Файл для коллег", icon="📤"),
         st.Page("views/sql.py", title="SQL-запрос", icon="⌨️"),
     ],

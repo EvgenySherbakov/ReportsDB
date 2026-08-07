@@ -37,11 +37,19 @@ file records only what a user can see.
 - The demo data now contains "network-wide" reports — one name across different
   networks and on several plants of a network. Without that overlap the new page
   would show 100% unique on the demo database and check nothing.
-- **A report's SQL query text** — a new optional file for the "SQL queries" role
-  on the "Load data" page: report name and query text, with no ТС or Завод.
-  Shown on its own tab of the report card. Matching is by name only, and the
-  text found is applied to every report sharing that name — the same report on
-  several plants gets the same query.
+- **Loading a report's SQL query text** — a new "SQL queries" file role on the
+  "Load data" page. Its structure mirrors the reports file: `№`, `ТС`, `Завод`,
+  `Каталог 1/2/3-го уровня`, `Наименование отчета`, `Запрос к базе данных`.
+  Matching is precise — "network + plant + catalog + name" — so a namesake report
+  on a neighbouring plant keeps its own query. If ТС and Завод are absent from the
+  file, the text lands on every report sharing that name.
+- **Database queries** — a new page in the "Tools" section: the query text per
+  report, with syntax highlighting and a `.sql` export. **Search covers the query
+  text**, which is how reports touching a table missing from the "source tables"
+  column are found. Tiles: reports with a query, their share, the median and
+  maximum number of lines in a query. Next to the query are the report's declared
+  sources flagged "present in the query", so any discrepancy shows at once. The
+  query text is also available on its own tab of the report card.
 
 ### Changed
 

@@ -170,6 +170,7 @@ Sections are nested, so the `pages/` folder does not fit — pages live in
 | Reports | `abc.py` | ABC analysis: where the load is concentrated for the chosen measure |
 | References | `tables.py` | All source objects: criticality, kind, dependencies |
 | References | `networks.py` | Plant comparison: database volume, share under reports |
+| Tools | `report_sql.py` | Database queries: the SQL text per report, with search over the query text |
 | Tools | `export.py` | Building the self-contained HTML file for colleagues |
 | Tools | `sql.py` | An ad-hoc query against the database |
 
