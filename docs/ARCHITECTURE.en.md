@@ -200,11 +200,14 @@ inside. Not a single external request: it opens over `file://` by double-click
 and works without internet. Light and dark themes, sorting, search, filters,
 CSV export.
 
-**Its contents mirror the app's sections.** Tabs follow the same menu groups as
-`st.navigation`: Data, DC analytics (№1–№5), Reports (card, volume and cost,
-candidates, similar reports, ABC), References. Each carries the same metric
-tiles, the same columns and the same breakdown of the selected row as the
-corresponding page. One DC selector for the whole file.
+**Its contents mirror the app's sections** — and that is verified by the
+`test_html_export_covers_every_app_page` test, which reads the page list from
+`app/Home.py`. The menu is a sidebar with the same groups as `st.navigation`:
+Data, DC analytics (№1–№5), Reports (card, volume and cost, candidates, similar
+reports, unique reports, ABC), References (tables, networks and plants), Tools
+(database queries). Each section carries the same metric tiles, the same columns
+and the same breakdown of the selected row as the corresponding page. One DC
+selector for the whole file.
 
 Data loading and ad-hoc SQL are not carried over: those are the database
 owner's tools. Charts are drawn in pure CSS — Plotly is not pulled into an
@@ -220,7 +223,13 @@ Three rules govern the set of queries in `export_html.py`:
   from a lookup.
 - Metric tiles are computed in the browser from what is actually displayed
   after the DC scope, search and filter — otherwise the numbers on top would
-  contradict the table below them.
+  contradict the table below them. The exception is "Database queries": there the
+  share's denominator is all reports in scope, because the list is filtered by
+  having a query by default and a share of it would always be 100%.
+- **Thresholds and flags the reader sets in the app are never wired into the
+  file.** "Unique reports" receives facts (namesakes, similarity) while the
+  "unique" flag is computed by JS from the slider position: otherwise there would
+  be two truths about uniqueness — one in the file, another in the app.
 
 Implemented without DuckDB-WASM on purpose — the rationale is in section 2.1 of
 the specification.

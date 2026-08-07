@@ -56,10 +56,23 @@
     background: var(--surface-0); color: var(--text-primary);
     font: 15px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
-  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  /* Каркас повторяет приложение: меню слева, содержимое справа. Плоская строка
+     вкладок при пятнадцати разделах переносилась на две строки, и найти в ней
+     нужный раздел было труднее, чем в списке. */
+  .app { display: grid; grid-template-columns: 236px minmax(0, 1fr);
+         gap: 1.75rem; max-width: 1500px; margin: 0 auto; }
+  .side { position: sticky; top: 0; align-self: start; max-height: 100vh;
+          overflow-y: auto; padding: 1.5rem 0 1rem; }
+  .brand { font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em;
+           margin-bottom: 1.1rem; }
+  .main { min-width: 0; }
   header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
-           padding: 1.75rem 0 1rem; }
+           padding: 1.5rem 0 1rem; }
   h1 { font-size: 1.4rem; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  /* Заголовок раздела живёт в его разметке — он же источник для строки в шапке,
+     поэтому здесь скрыт: иначе одно и то же название читалось бы дважды. */
+  section > h2 { display: none; }
   h2 { font-size: 1.05rem; margin: 0 0 .75rem; font-weight: 620; }
   h3 { font-size: .95rem; margin: 1.1rem 0 .6rem; font-weight: 620; }
   .sub { color: var(--text-muted); font-size: .85rem; }
@@ -74,19 +87,32 @@
   .scopebar label.exact { display: inline-flex; align-items: center; gap: .35rem;
                           cursor: pointer; user-select: none; }
 
-  /* Вкладки повторяют разделы меню приложения. */
-  nav.tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: 1.1rem;
-             align-items: center; }
-  nav.tabs .grp { color: var(--text-muted); font-size: .72rem; text-transform: uppercase;
-                  letter-spacing: .05em; padding: 0 .3rem 0 .7rem; }
-  nav.tabs .grp:first-child { padding-left: 0; }
-  nav.tabs button { background: var(--surface-1); color: var(--text-secondary);
-                    border: 1px solid var(--border); border-radius: 7px;
-                    padding: .35rem .7rem; cursor: pointer; font-size: .85rem;
+  /* Меню повторяет разделы приложения: те же группы, те же названия. */
+  nav.tabs { display: flex; flex-direction: column; gap: 1px; }
+  nav.tabs .grp { color: var(--text-muted); font-size: .7rem; text-transform: uppercase;
+                  letter-spacing: .05em; font-weight: 600;
+                  padding: .9rem .6rem .3rem; }
+  nav.tabs .grp:first-child { padding-top: 0; }
+  nav.tabs button { display: block; width: 100%; text-align: left;
+                    background: none; color: var(--text-secondary);
+                    border: none; border-radius: 7px;
+                    padding: .4rem .6rem; cursor: pointer; font-size: .87rem;
                     font-family: inherit; }
-  nav.tabs button:hover { color: var(--text-primary); }
+  nav.tabs button:hover { background: var(--surface-1); color: var(--text-primary); }
   nav.tabs button[aria-selected="true"] { background: var(--series-1); color: #fff;
-                                          border-color: var(--series-1); }
+                                          font-weight: 550; }
+
+  /* Узкий экран: меню возвращается наверх строкой — вертикальный список занял бы
+     весь первый экран, и до содержимого пришлось бы скроллить. */
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; gap: 0; }
+    .side { position: static; max-height: none; padding-bottom: 0; }
+    nav.tabs { flex-direction: row; flex-wrap: wrap; gap: .35rem;
+               margin-bottom: 1rem; align-items: center; }
+    nav.tabs .grp { padding: 0 .2rem 0 .5rem; }
+    nav.tabs button { width: auto; background: var(--surface-1);
+                      border: 1px solid var(--border); }
+  }
 
   /* Вложенные виды внутри раздела — как st.tabs в приложении. */
   nav.subtabs { display: flex; gap: .35rem; margin: 0 0 .9rem; flex-wrap: wrap; }
@@ -173,15 +199,36 @@
   .metrics .v { font-size: 1.15rem; font-weight: 630; font-variant-numeric: tabular-nums; }
   .metrics .l { color: var(--text-secondary); font-size: .75rem; }
 
+  /* Текст SQL-запроса: моноширинный, с переносами по строкам исходника.
+     pre-wrap, а не pre: длинная строка иначе растягивала бы страницу по
+     горизонтали, и читать её пришлось бы прокруткой всего документа. */
+  pre.sql { background: var(--surface-0); border: 1px solid var(--border);
+            border-radius: 8px; padding: .8rem .9rem; margin: 0 0 .8rem;
+            overflow-x: auto; max-height: 460px; overflow-y: auto;
+            font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas,
+                  "Liberation Mono", monospace;
+            white-space: pre-wrap; word-break: break-word; }
+  code { font: 92%/1 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  input[type=range] { accent-color: var(--series-1); width: 150px; }
+
   .empty { color: var(--text-muted); font-size: .87rem; padding: .5rem 0; }
   .hint { color: var(--text-secondary); font-size: .85rem; margin: -.4rem 0 .9rem; }
+  /* Отрицательный отступ у .hint рассчитан на позицию сразу под заголовком.
+     После диаграммы или таблицы он прижимает подпись к последней строке. */
+  .chart + .hint, .scroll + .hint, table + .hint { margin-top: .9rem; }
   footer { color: var(--text-muted); font-size: .8rem; padding-top: .5rem; }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="app">
+<aside class="side">
+  <div class="brand">Отчётность SSRS</div>
+  <nav class="tabs" id="tabs"></nav>
+</aside>
+
+<main class="main">
 <header>
-  <h1>Отчётность SSRS</h1>
+  <h1 id="page-title">Обзор</h1>
   <span class="sub" id="meta"></span>
   <span class="scopebar">
     <label for="f-rc">Распределительный центр</label>
@@ -193,11 +240,10 @@
   </span>
 </header>
 
-<nav class="tabs" id="tabs"></nav>
-
 <!-- ======================= Обзор ======================= -->
 <section data-tab="overview">
-  <h2 id="kpi-title">Показатели</h2>
+  <h2>Обзор</h2>
+  <p class="hint" id="kpi-scope"></p>
   <div class="kpis" id="kpis"></div>
   <p class="note">
     <b>gross_mb</b> суммирует общие таблицы в каждом отчёте заново — складывать этот
@@ -205,8 +251,6 @@
     освободится при выводе отчёта, — <b>exclusive_mb</b>: таблицы, которых не
     касается больше ни один отчёт.
   </p>
-  <h3>Сравнение РЦ</h3>
-  <div class="scroll"><table id="t-rc"></table></div>
   <h3>Схемы БД</h3>
   <div class="scroll tall"><table id="t-schemas"></table></div>
   <h3>Топ-20 отчётов по освобождаемому объёму</h3>
@@ -422,7 +466,67 @@
   <div class="scroll tall"><table id="t-abc"></table></div>
 </section>
 
+<section data-tab="unique" hidden>
+  <h2>Уникальные отчёты</h2>
+  <p class="hint" id="unique-hint"></p>
+  <div class="controls">
+    <label class="count" for="f-uscope">Что с чем сравнивать</label>
+    <select id="f-uscope">
+      <option value="net">Между ТС — чего нет в других сетях</option>
+      <option value="plant">Между заводами одной ТС — чего нет у соседей</option>
+    </select>
+    <label class="count" for="f-uthr">Порог сходства</label>
+    <input type="range" id="f-uthr" min="5" max="100" step="5" value="80">
+    <span class="count" id="c-uthr">80%</span>
+  </div>
+  <div class="metrics" id="m-unique"></div>
+  <p class="note" id="unique-alone" hidden></p>
+  <h3>Сколько своих отчётов</h3>
+  <div class="legend">
+    <span><i class="s1"></i>Уникальные</span>
+    <span><i class="s2"></i><span id="unique-other">Есть на другой стороне</span></span>
+  </div>
+  <div class="chart" id="chart-unique"></div>
+  <div class="scroll"><table id="t-usummary"></table></div>
+  <h3>Отчёты</h3>
+  <p class="hint">«Ближайший двойник» — самый похожий отчёт на другой стороне и
+  величина сходства. У уникальных отчётов он тоже показан: сходство ниже порога,
+  поэтому двойником не считается. «тёзка» означает совпадение наименования — при
+  любом наборе таблиц это тот же отчёт.</p>
+  <div class="controls">
+    <input type="search" id="q-unique" placeholder="Поиск по отчёту…">
+    <label class="exact"><input type="checkbox" id="f-uall"> Показать и отчёты с двойниками</label>
+    <span class="count" id="c-unique"></span>
+    <button class="csv" data-csv="unique">Выгрузить CSV</button>
+  </div>
+  <div class="scroll tall"><table id="t-unique"></table></div>
+</section>
+
 <!-- ===================== Справочники ==================== -->
+<section data-tab="networks" hidden>
+  <h2>Сети и заводы</h2>
+  <p class="hint">Чем заводы отличаются друг от друга: сколько данных лежит на
+  каждом, какая доля под отчётами, сколько отчётов и во что они обходятся по
+  времени. «Объём базы» — сумма размеров таблиц этого завода из файла размеров;
+  складывать заводы в один итог можно, замеры у них независимые.</p>
+  <div class="metrics" id="m-networks"></div>
+  <h3>Объём базы по заводам</h3>
+  <div class="legend">
+    <span><i class="s1"></i>Под отчётами</span>
+    <span><i class="s2"></i>Без отчётов</span>
+  </div>
+  <div class="chart" id="chart-networks"></div>
+  <p class="hint">«Без отчётов» — таблицы, к которым не тянется ни один отчёт.
+  Это не мусор автоматически: данные могут читаться напрямую или через
+  процедуры, которых в выгрузке нет.</p>
+  <h3>Сравнение РЦ</h3>
+  <div class="controls">
+    <span class="count" id="c-rc"></span>
+    <button class="csv" data-csv="rc">Выгрузить CSV</button>
+  </div>
+  <div class="scroll"><table id="t-rc"></table></div>
+</section>
+
 <section data-tab="tables" hidden>
   <h2>Объекты-источники</h2>
   <p class="hint">Таблицы, представления (view), материализованные view,
@@ -439,7 +543,30 @@
   <div class="scroll tall"><table id="t-tables"></table></div>
 </section>
 
+<!-- ===================== Инструменты ==================== -->
+<section data-tab="reportsql" hidden>
+  <h2>Запросы к БД</h2>
+  <p class="hint">Текст запроса, которым формируется отчёт. <b>Поиск работает и
+  по тексту запроса</b> — так видно обращения к таблице, которых нет в колонке
+  «Таблицы источники данных» исходного файла: например, через <code>JOIN</code>
+  внутри подзапроса.</p>
+  <div class="metrics" id="m-reportsql"></div>
+  <p class="note" id="sql-missing" hidden>Ни у одного отчёта нет текста запроса:
+  файл SQL-запросов не загружали перед сборкой этого файла.</p>
+  <div class="controls">
+    <input type="search" id="q-reportsql" placeholder="Поиск по отчёту, каталогу или тексту запроса…">
+    <label class="exact"><input type="checkbox" id="f-sqlall"> Показать и отчёты без запроса</label>
+    <span class="count" id="c-reportsql"></span>
+    <button class="csv" data-csv="reportsql">Выгрузить CSV</button>
+  </div>
+  <div class="scroll" style="max-height:330px;overflow-y:auto">
+    <table id="t-reportsql"></table>
+  </div>
+  <div class="card" id="reportsql-detail"></div>
+</section>
+
 <footer id="foot"></footer>
+</main>
 </div>
 
 <script>
@@ -616,7 +743,7 @@ const k = DATA.kpi;
 function drawKpis() {
   const reports = DATA.reports.filter(inScope);
   const sizes = DATA.sizes.filter(inScope);
-  document.getElementById('kpi-title').textContent =
+  document.getElementById('kpi-scope').textContent =
     'Показатели: ' + (rcSelect.value || 'по всем ТС и заводам');
   const kpis = [
     ['Отчётов', fmt(reports.length)],
@@ -663,10 +790,15 @@ const getters = {};     // текущая выборка каждой табли
 const COLS = {};
 
 function makeTable(opts) {
-  const { name, el, rows, cols, search, filter, filterField, filterLabel,
-          count, onPick, pickKey, rowsFn, onRender } = opts;
+  const { name, el, rows, search, filter, filterField, filterLabel,
+          count, onPick, pickKey, rowsFn, onRender, colsFn } = opts;
   const table = document.getElementById(el);
   const counter = count ? document.getElementById(count) : null;
+  // colsFn — для таблиц, у которых набор колонок меняется вместе с разрезом
+  // («Уникальные отчёты»). Пересобирать всю таблицу нельзя: makeTable добавляет
+  // свой render в общий список перерисовки, и старые обработчики остались бы
+  // висеть на том же элементе, перебивая новые колонки.
+  let cols = colsFn ? colsFn() : opts.cols;
   let sortKey = cols.find(c => c.sort)?.key ?? cols[0].key;
   let sortDir = 'desc';
   // Выбранная строка хранится ключом, а не ссылкой на объект: строки видов,
@@ -717,6 +849,16 @@ function makeTable(opts) {
   }
 
   function render() {
+    if (colsFn) {
+      cols = colsFn();
+      COLS[name] = cols;
+      // Сортировали по колонке, которой в новом разрезе нет — возвращаемся к
+      // колонке по умолчанию, иначе таблица молча осталась бы несортированной.
+      if (!cols.some(c => c.key === sortKey)) {
+        sortKey = cols.find(c => c.sort)?.key ?? cols[0].key;
+        sortDir = 'desc';
+      }
+    }
     const data = current();
     if (counter) counter.textContent = `строк: ${fmt(data.length)}`;
     const head = cols.map(c =>
@@ -1224,8 +1366,52 @@ function showOverlap(row) {
       rows.map(([n, w]) => [esc(n), esc(w)]))}`;
 }
 
+/* --- Сети и заводы ------------------------------------------------------ */
+// Строки-заглушки «(не указана)/(не указан)» в счётчики сетей и заводов не
+// идут: это не сеть и не завод, а незаполненная колонка исходного файла.
+const realRc = () => DATA.rc.filter(r =>
+  r.network !== '(не указана)' && r.plant !== '(не указан)');
+
+function drawNetworks() {
+  const rows = DATA.rc.filter(inScope);
+  const real = rows.filter(r =>
+    r.network !== '(не указана)' && r.plant !== '(не указан)');
+  const dbTotal = sumOf(rows, 'db_total_mb');
+  tiles('m-networks', [
+    ['Торговых сетей', fmt(uniqOf(real, 'network'))],
+    ['Заводов', fmt(real.length)],
+    ['Объём базы, ГБ', dbTotal ? fmt(dbTotal / 1024, 1) : '—'],
+    ['Под отчётами', dbTotal
+      ? Math.round(100 * sumOf(rows, 'used_mb') / dbTotal) + '%' : '—'],
+  ]);
+
+  // Один стек на завод: под отчётами и без отчётов. Две величины одной природы
+  // и одной шкалы — честные столбики, а не две оси.
+  const host = document.getElementById('chart-networks');
+  const chart = rows.filter(r => r.db_total_mb)
+    .sort((a, b) => b.db_total_mb - a.db_total_mb);
+  if (!chart.length) {
+    host.innerHTML = '<div class="empty">Файл размеров не загружен — '
+      + 'сравнивать объёмы нечем.</div>';
+    return;
+  }
+  const max = Math.max(...chart.map(r => r.db_total_mb));
+  host.innerHTML = chart.map(r => {
+    const label = `${r.network} · ${r.plant}`;
+    const used = 100 * (r.used_mb || 0) / max;
+    const free = 100 * (r.unused_mb || 0) / max;
+    return `<div class="lbl" title="${esc(label)}">${esc(label)}</div>
+      <div class="track">
+        ${used > 0 ? `<div class="seg s1" style="width:${used}%"></div>` : ''}
+        ${free > 0 ? `<div class="seg s2" style="width:${free}%"></div>` : ''}
+      </div>
+      <div class="val">${fmtInt(r.used_mb)} / ${fmtInt(r.db_total_mb)} МБ</div>`;
+  }).join('');
+}
+renderers.push(drawNetworks);
+
 /* --- Сборка таблиц ------------------------------------------------------ */
-makeTable({name: 'rc', el: 't-rc', rows: DATA.rc, cols: RC_COLS});
+makeTable({name: 'rc', el: 't-rc', rows: DATA.rc, cols: RC_COLS, count: 'c-rc'});
 makeTable({name: 'schemas', el: 't-schemas', rowsFn: schemaRows, cols: SCHEMA_COLS});
 makeTable({name: 'sizes', el: 't-sizes', rows: DATA.sizes, cols: SIZE_COLS,
   search: document.getElementById('q-sizes'), count: 'c-sizes',
@@ -1335,11 +1521,269 @@ makeTable({name: 'tables', el: 't-tables', rows: DATA.tables, cols: TABLE_COLS,
       ? fmt(sumOf(d, 'percent_of_total'), 2) : '—'],
   ])});
 
+/* --- Уникальные отчёты -------------------------------------------------- */
+// Витрины отдают ФАКТЫ (тёзки, сходство), а порог задаёт читатель — ползунком,
+// как в приложении. Поэтому признак «уникален» считается здесь, в браузере, и
+// файл не хранит второй правды об уникальности.
+const uScope = document.getElementById('f-uscope');
+const uThr = document.getElementById('f-uthr');
+const uAll = document.getElementById('f-uall');
+const uSearch = document.getElementById('q-unique');
+const TWIN_BY_ID = new Map(DATA.twin.map(t => [t.report_id, t]));
+
+const byNetworks = () => uScope.value === 'net';
+const threshold = () => Number(uThr.value) / 100;
+
+// Строка списка: в разрезе ТС единица — отчёт сети (заводы схлопнуты), в
+// разрезе заводов — запись отчёта на заводе. Считать отчёт сети трижды, по
+// числу её заводов, значило бы завысить «своё» втрое.
+function uniqueRows() {
+  const thr = threshold();
+  if (byNetworks()) {
+    return DATA.nettwin.map(r => ({
+      ...r,
+      row_key: r.network + ' · ' + r.name_key,
+      plant: null,
+      is_unique: r.name_twin_count === 0
+        && (r.best_jaccard === null || r.best_jaccard < thr),
+      twin_where: r.name_twin_count
+        ? 'тёзка: ' + (r.name_twin_networks || '—')
+        : (r.best_jaccard === null ? '—'
+          : `${r.best_twin_network || '—'} · ${Math.round(r.best_jaccard * 100)}%`),
+    }));
+  }
+  return DATA.reports.map(r => {
+    const t = TWIN_BY_ID.get(r.report_id) || {};
+    const nameTwins = t.name_twin_count || 0;
+    const j = t.best_jaccard ?? null;
+    return {
+      ...r,
+      row_key: String(r.report_id),
+      tables_total_mb: r.tables_total_mb,
+      networks_compared: t.counterparts_compared ?? 0,
+      counterparts_compared: t.counterparts_compared ?? 0,
+      best_jaccard: j,
+      is_unique: nameTwins === 0 && (j === null || j < thr),
+      twin_where: nameTwins ? 'тёзка: ' + (t.name_twin_where || '—')
+        : (j === null ? '—'
+          : `${t.best_twin_where || '—'} · ${Math.round(j * 100)}%`),
+    };
+  });
+}
+
+const UNIQUE_NET_COLS = [
+  {key: 'network', label: 'ТС'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'plant_count', label: 'Заводов', num: true},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'tables_total_mb', label: 'Объём, МБ', num: true, dec: 1, sort: true},
+  {key: 'exec_count', label: 'Запусков', num: true},
+  {key: 'twin_where', label: 'Ближайший двойник'},
+];
+const UNIQUE_PLANT_COLS = [
+  {key: 'plant', label: 'Завод'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'table_count', label: 'Таблиц', num: true},
+  {key: 'tables_total_mb', label: 'Объём, МБ', num: true, dec: 1, sort: true},
+  {key: 'exec_count', label: 'Запусков', num: true},
+  {key: 'catalog_path', label: 'Каталог'},
+  {key: 'twin_where', label: 'Ближайший двойник'},
+];
+const USUMMARY_COLS = [
+  {key: 'label', label: 'ТС / завод'},
+  {key: 'reports', label: 'Отчётов всего', num: true},
+  {key: 'unique_reports', label: 'Уникальных', num: true, sort: true},
+  {key: 'unique_share', label: 'Доля, %', num: true, dec: 1},
+  {key: 'unique_mb', label: 'Объём их таблиц, МБ', num: true},
+  {key: 'unique_execs', label: 'Запусков', num: true},
+  {key: 'compared', label: 'Сравнивалось'},
+];
+
+// Свод по сетям или заводам. Считается по тому же набору, что показан ниже.
+function uniqueSummary() {
+  const groups = new Map();
+  for (const r of uniqueRows().filter(inScope)) {
+    const label = byNetworks() ? r.network : `${r.network} · ${r.plant}`;
+    let g = groups.get(label);
+    if (!g) {
+      g = {label, reports: 0, unique_reports: 0, unique_mb: 0, unique_execs: 0,
+           compared: byNetworks() ? r.networks_compared : r.counterparts_compared};
+      groups.set(label, g);
+    }
+    g.reports++;
+    if (r.is_unique) {
+      g.unique_reports++;
+      g.unique_mb += r.tables_total_mb || 0;
+      g.unique_execs += r.exec_count || 0;
+    }
+  }
+  return [...groups.values()].map(g => ({
+    ...g,
+    shared_reports: g.reports - g.unique_reports,
+    unique_share: g.reports ? 100 * g.unique_reports / g.reports : null,
+  })).sort((a, b) => b.unique_reports - a.unique_reports);
+}
+
+function drawUnique() {
+  const net = byNetworks();
+  document.getElementById('c-uthr').textContent = uThr.value + '%';
+  document.getElementById('unique-other').textContent =
+    net ? 'Есть в других ТС' : 'Есть у соседей по ТС';
+  document.getElementById('unique-hint').innerHTML = net
+    ? 'Отчёты, которых нет ни в одной другой ТС: ни тёзки, ни отчёта с похожим '
+      + 'набором таблиц. Отчёт, стоящий на нескольких заводах одной сети, — это '
+      + '<b>один</b> отчёт этой сети.'
+    : 'Отчёты, которых нет у соседних заводов <b>своей</b> ТС. Другие сети в '
+      + 'этом разрезе не участвуют.';
+
+  const rows = uniqueRows().filter(inScope);
+  const uniq = rows.filter(r => r.is_unique);
+  tiles('m-unique', [
+    ['Уникальных отчётов', fmt(uniq.length)],
+    ['Доля уникальных', rows.length
+      ? Math.round(100 * uniq.length / rows.length) + '%' : '—'],
+    ['Объём их таблиц, МБ', hasAny(uniq, 'tables_total_mb')
+      ? fmtInt(sumOf(uniq, 'tables_total_mb')) : '—'],
+    ['Запусков', hasAny(uniq, 'exec_count') ? fmtInt(sumOf(uniq, 'exec_count')) : '—'],
+  ]);
+
+  const summary = uniqueSummary();
+  // Тот, кому не с кем сравниться, назван прямо: иначе «все отчёты уникальны»
+  // читается как вывод, хотя это отсутствие данных для сравнения.
+  const alone = summary.filter(g => !g.compared);
+  const note = document.getElementById('unique-alone');
+  note.hidden = !alone.length;
+  if (alone.length) {
+    note.innerHTML = 'Сравнивать не с чем: <b>'
+      + alone.map(g => esc(g.label)).join('</b>, <b>') + '</b> — '
+      + (net ? 'других сетей с отчётами в базе нет'
+             : 'в этой ТС других заводов с отчётами нет')
+      + ', поэтому все их отчёты попали в уникальные. Это не признак того, что '
+      + 'отчёты особенные.';
+  }
+
+  const host = document.getElementById('chart-unique');
+  if (summary.length < 2) {
+    host.innerHTML = '<div class="empty">Для сравнения нужны хотя бы две '
+      + (net ? 'сети' : 'площадки') + '.</div>';
+  } else {
+    const max = Math.max(...summary.map(g => g.reports));
+    host.innerHTML = [...summary].sort((a, b) => b.unique_reports - a.unique_reports)
+      .map(g => {
+        const u = 100 * g.unique_reports / max;
+        const s = 100 * g.shared_reports / max;
+        return `<div class="lbl" title="${esc(g.label)}">${esc(g.label)}</div>
+          <div class="track">
+            ${u > 0 ? `<div class="seg s1" style="width:${u}%"></div>` : ''}
+            ${s > 0 ? `<div class="seg s2" style="width:${s}%"></div>` : ''}
+          </div>
+          <div class="val">${fmt(g.unique_reports)} из ${fmt(g.reports)}</div>`;
+      }).join('');
+  }
+}
+
+makeTable({
+  name: 'unique', el: 't-unique',
+  colsFn: () => byNetworks() ? UNIQUE_NET_COLS : UNIQUE_PLANT_COLS,
+  rowsFn: () => uniqueRows().filter(r => uAll.checked || r.is_unique),
+  search: uSearch, count: 'c-unique',
+});
+
+makeTable({name: 'usummary', el: 't-usummary', rowsFn: uniqueSummary,
+  cols: USUMMARY_COLS});
+
+/* --- Запросы к БД -------------------------------------------------------- */
+// Текст запроса приезжает в файл вместе с отчётами, поэтому отдельного набора
+// данных не нужно. Строк в запросе считаем здесь: в файле их хранить незачем.
+const sqlAll = document.getElementById('f-sqlall');
+const SQL_COLS = [
+  {key: 'plant', label: 'Завод'},
+  {key: 'report_name', label: 'Отчёт', wide: true},
+  {key: 'sql_lines', label: 'Строк', num: true, sort: true},
+  {key: 'sql_chars', label: 'Знаков', num: true},
+  {key: 'catalog_path', label: 'Каталог'},
+];
+for (const r of DATA.reports) {
+  r.sql_lines = r.sql_text ? r.sql_text.split('\n').length : null;
+  r.sql_chars = r.sql_text ? r.sql_text.length : null;
+}
+const withSqlTotal = DATA.reports.filter(r => r.sql_text).length;
+document.getElementById('sql-missing').hidden = withSqlTotal > 0;
+
+function showReportSql(row) {
+  const host = document.getElementById('reportsql-detail');
+  if (!row) {
+    host.innerHTML = '<div class="empty">Щёлкните по строке отчёта, '
+      + 'чтобы увидеть его запрос.</div>';
+    return;
+  }
+  if (!row.sql_text) {
+    host.innerHTML = `<div class="title">${esc(row.report_name)}</div>
+      <div class="path">${esc(row.network)} · ${esc(row.plant)} · ${esc(row.catalog_path)}</div>
+      <div class="empty">Для этого отчёта текст запроса не загружен: его не было
+      в файле SQL-запросов либо строка не сопоставилась с каталогом отчётов.</div>`;
+    return;
+  }
+  // Какие из заявленных источников упомянуты в тексте: сравнение и по имени без
+  // схемы тоже — в запросах таблицу пишут и со схемой, и без. «нет» бывает
+  // законным: объект может приходить через view или процедуру.
+  const lower = row.sql_text.toLowerCase();
+  const sources = (OBJECTS_BY_REPORT.get(row.report_id) || []).map(o => {
+    const name = o.full_name.toLowerCase();
+    const short = name.slice(name.lastIndexOf('.') + 1);
+    return {full_name: o.full_name, kind_ru: kindRu(o.object_kind),
+            in_sql: lower.includes(name) || lower.includes(short) ? 'да' : 'нет'};
+  });
+  host.innerHTML = `<div class="title">${esc(row.report_name)}</div>
+    <div class="path">№ ${esc(row.report_no ?? '—')} · ${esc(row.network)} ·
+      ${esc(row.plant)} · ${esc(row.catalog_path)}</div>
+    <div class="metrics">
+      <div><div class="v">${fmt(row.sql_lines)}</div><div class="l">Строк в запросе</div></div>
+      <div><div class="v">${fmt(row.sql_chars)}</div><div class="l">Знаков</div></div>
+      <div><div class="v">${fmt(row.table_count)}</div><div class="l">Заявленных таблиц</div></div>
+    </div>
+    ${row.uses_view ? '<p class="note">Отчёт помечен как работающий через view: '
+      + 'за view могут стоять таблицы, которых нет ни в списке источников, ни в '
+      + 'самом тексте запроса.</p>' : ''}
+    <pre class="sql">${esc(row.sql_text)}</pre>
+    <h3>Заявленные источники отчёта</h3>
+    <p class="hint">Из колонок исходного файла. Если в запросе выше есть таблица,
+    которой нет здесь, — список источников в файле неполон, и объём отчёта
+    занижен.</p>
+    ${sources.length ? `<div class="scroll"><table>
+      <thead><tr><th>Объект</th><th>Тип</th><th>Есть в запросе</th></tr></thead>
+      <tbody>${sources.map(s => `<tr><td class="name">${esc(s.full_name)}</td>
+        <td>${esc(s.kind_ru)}</td><td>${s.in_sql}</td></tr>`).join('')}</tbody>
+    </table></div>`
+      : '<div class="empty">У отчёта не указано ни одного объекта-источника.</div>'}`;
+}
+
+makeTable({name: 'reportsql', el: 't-reportsql', cols: SQL_COLS,
+  rowsFn: () => DATA.reports.filter(r => sqlAll.checked || r.sql_text),
+  search: document.getElementById('q-reportsql'), count: 'c-reportsql',
+  onPick: showReportSql, pickKey: 'report_id',
+  onRender: () => {
+    // Знаменатель — ВСЕ отчёты разреза, а не показанный список: список по
+    // умолчанию отфильтрован по наличию запроса, и доля от него всегда была бы
+    // 100%. Плитки должны отвечать «у скольких отчётов запрос есть вообще».
+    const scoped = DATA.reports.filter(inScope);
+    const withSql = scoped.filter(r => r.sql_text);
+    tiles('m-reportsql', [
+      ['Отчётов с запросом', fmt(withSql.length)],
+      ['Доля с запросом', scoped.length
+        ? Math.round(100 * withSql.length / scoped.length) + '%' : '—'],
+      ['Медиана строк', fmt(medianOf(withSql, 'sql_lines'))],
+      ['Самый длинный, строк', withSql.length
+        ? fmt(Math.max(...withSql.map(r => r.sql_lines))) : '—'],
+    ]);
+  }});
+
 function redrawAll() {
   renderers.forEach(fn => fn());
   drawKpis();
   drawTop();
   drawAbcSummary();
+  drawUnique();
 }
 
 drawKpis();
@@ -1347,9 +1791,17 @@ showCard(null);
 showRc2Report(null);
 showRc2Table(null);
 showOverlap(null);
+showReportSql(null);
 drawTop();
 drawAbcSummary();
+drawUnique();
 
+// Разрез и порог сходства меняют признак «уникален», поэтому перерисовываются
+// и свод, и список, и диаграмма — всё считается из одного набора фактов.
+uScope.onchange = redrawAll;
+uThr.oninput = redrawAll;
+uAll.onchange = redrawAll;
+sqlAll.onchange = redrawAll;
 measureSelect.onchange = redrawAll;
 // Выбранную строку не сбрасываем: если отчёт остался в разрезе, разбор о нём
 // по-прежнему верен, а если уехал — makeTable снимет выбор сам.
@@ -1381,9 +1833,10 @@ const TABS = [
   ['Отчёты', [
     ['card', 'Карточка отчёта'], ['cost', 'Объём и стоимость'],
     ['candidates', 'Кандидаты на вывод'], ['overlap', 'Похожие отчёты'],
-    ['abc', 'ABC-анализ'],
+    ['unique', 'Уникальные отчёты'], ['abc', 'ABC-анализ'],
   ]],
-  ['Справочники', [['tables', 'Таблицы']]],
+  ['Справочники', [['tables', 'Таблицы'], ['networks', 'Сети и заводы']]],
+  ['Инструменты', [['reportsql', 'Запросы к БД']]],
 ];
 const nav = document.getElementById('tabs');
 nav.innerHTML = TABS.map(([group, items]) =>
@@ -1395,13 +1848,22 @@ const TAB_IDS = new Set(TABS.flatMap(([, items]) => items.map(([id]) => id)));
 
 function openTab(id) {
   if (!TAB_IDS.has(id)) id = 'overview';
+  let active = null;
   document.querySelectorAll('section[data-tab]').forEach(s => {
     s.hidden = s.dataset.tab !== id;
+    if (!s.hidden) active = s;
   });
   nav.querySelectorAll('button').forEach(b => {
     b.setAttribute('aria-selected', String(b.dataset.tab === id));
   });
+  // Название берётся из заголовка самого раздела, а не из подписи в меню: так
+  // строка в шапке не разъезжается с разделом при переименовании.
+  const heading = active?.querySelector('h2');
+  if (heading) document.getElementById('page-title').textContent = heading.textContent;
   history.replaceState(null, '', '#' + id);
+  // Переключили раздел — прокрутка возвращается наверх: иначе после длинной
+  // таблицы новый раздел открывается где-то посередине.
+  window.scrollTo({top: 0});
 }
 nav.querySelectorAll('button').forEach(b => b.onclick = () => openTab(b.dataset.tab));
 openTab((location.hash || '#overview').slice(1));

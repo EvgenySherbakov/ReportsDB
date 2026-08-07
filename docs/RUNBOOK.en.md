@@ -259,10 +259,11 @@ Whoever already has the project running (option A or B) does one of two things:
 Send the file to a colleague any way you like — email, messenger, a USB stick.
 The recipient saves it to disk and opens it by double-click.
 
-Inside it is the same as in the app: tabs follow the same menu sections
-(Overview, all of "DC analytics" №1–№5, the whole "Reports" section — card,
-volume and cost, decommission candidates, similar reports, ABC analysis — and
-the object reference). The same metrics, the same columns, the same
+Inside it are all of the app's pages: the left menu is the same (Overview,
+"DC analytics" №1–№5, the whole "Reports" section — card, volume and cost,
+decommission candidates, similar reports, unique reports, ABC analysis — the
+"Tables" and "Networks and plants" references, plus "Database queries" with the
+SQL text per report). The same metrics, the same columns, the same
 click-a-row breakdown, one DC selector for the whole file. Lists are complete,
 nothing is truncated. Search, sorting and CSV export of the current selection
 work without internet, and there are light and dark themes.

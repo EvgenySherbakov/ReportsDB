@@ -53,6 +53,18 @@ file records only what a user can see.
 
 ### Changed
 
+- **The colleague HTML file is now complete: it holds every page of the app.**
+  Added "Unique reports" (with both comparison scopes and the threshold slider),
+  "Database queries" (the SQL text per report, with search over the query text)
+  and "Networks and plants" (tiles, the "under reports / without reports" stack,
+  and the DC comparison moved over from "Overview"). The match with the app is now
+  pinned by a test — a new page cannot appear in the app while being absent from
+  the file.
+- **The menu in the HTML file moved to the left, as in the app.** A flat row of
+  tabs wrapped onto two lines at fifteen sections, and finding the right one was
+  harder than in a list. The current section's name moved into the header, and on
+  a narrow screen the menu returns to the top as a row. It is still a single file:
+  data, styles and scripts inside, not one external request.
 - **Usage statistics (executions, duration) are read only from a separate
   file.** They used to be taken straight from the main reports file, with the
   separate file as an optional override; now the main file never reads those

@@ -846,17 +846,41 @@ A single file, `dist/reportsdb.html`. Inside: data as JSON, styles and scripts
 inline, zero external requests. It must open over `file://` in Chrome, Edge and
 Firefox.
 
-**Its contents mirror the app's sections.** A colleague without Python and
-Docker must see the same thing as the database owner: tabs are grouped by the
-same menu groups, and each carries the same metrics, the same columns and the
-same breakdown of the selected row.
+**Its contents mirror the app's sections**, and that rule is now pinned by the
+`test_html_export_covers_every_app_page` test: it reads the page list from
+`app/Home.py` and demands a section in the template and an entry in the menu for
+each one. Before the test the rule rested on words in this document — a page
+appeared in the app, was missing from the file, and nothing caught the
+discrepancy. Only the database owner's tools are excluded: loading data, ad-hoc
+SQL and building the file itself.
 
-| Tab group | Tabs |
+The menu is a **sidebar, as in the app**. A flat row of tabs wrapped onto two
+lines at fifteen sections, and finding the right one there was harder than in a
+list. On a narrow screen (up to 900 px) the menu returns to the top as a row: a
+vertical list would take up the whole first screen.
+
+| Menu group | Sections |
 | --- | --- |
-| Data | Overview: four DC-scoped tiles, DC comparison, database schemas as a table, top 20 by freed volume |
+| Data | Overview: four DC-scoped tiles, database schemas as a table, top 20 by freed volume |
 | DC analytics | №1 Tables and sizes · №2 Report → tables · №3 Report → routines · №4 Report → executions · №5 Retention depth |
-| Reports | Report card · Volume and cost · Decommission candidates · Similar reports · ABC analysis |
-| References | Source objects: tables, views, mat.views, temporary objects, routines |
+| Reports | Report card · Volume and cost · Decommission candidates · Similar reports · Unique reports · ABC analysis |
+| References | Tables (source objects) · Networks and plants |
+| Tools | Database queries: the SQL text per report, with search over the text |
+
+Three sections arrived later than the rest and deserve a separate word:
+
+- **Unique reports** — with both comparison scopes and the **threshold slider**,
+  as in the app. Facts travel into the file (namesakes, similarity, the closest
+  twin) while the "unique" flag is computed in the browser: a wired-in threshold
+  would create a second truth about uniqueness — one in the file, another in the
+  app.
+- **Database queries** — the SQL text travels in full. Truncating would show an
+  incomplete query that cannot be judged; it affects the size noticeably, which
+  is why the build page reports the file's weight.
+- **Networks and plants** — the DC comparison moved here from "Overview": in the
+  app this is a separate page with its own tiles and the "under reports / without
+  reports" stack, and keeping half of it inside "Overview" meant showing less
+  than there is.
 
 Common properties:
 
@@ -1058,3 +1082,8 @@ The second half is a new `report_sql` file: report name and SQL query text, show
 | 2026-08-06 | **The SQL query file mirrors the reports file's structure, and queries got their own page.** The customer showed the actual format: `№`, `ТС`, `Завод`, `Каталог 1/2/3-го уровня`, `Наименование отчета`, `Запрос к базе данных` — the file does carry an organisational breakdown, which the previous entry did not assume. That changes the matching rule for the better: instead of "hand the text to every namesake", three tiers now work, as with usage statistics — `(network, plant, catalog, name)` → `(network, plant, name)` → a bare name. The path is assembled from the three levels by the same `join_folders` used for the reports file. The former behaviour is kept as the branch for files **without** ТС and Завод: there a name still goes to every namesake, because a query describes the report's definition rather than a site. But if ТС and Завод are present and the row failed to match through them, a bare name is only accepted when it is unique across the database: otherwise the query would land on a foreign plant that has its own. Both rules are pinned by separate tests. The demo data was updated: `sample_report_sql.xlsx` now carries ТС, Завод and the catalog, and the query mentions the report's first table — on such a row it is visible that searching by query text really does find reports by a table name.
 
 The second half is the **"Tools → Database queries"** page (`report_sql.py`). A separate page rather than only a card tab: the card answers "everything about this report", while here the order is reversed — searching **by the query text**, with `sql_text` included in the search. That answers "which reports touch this table" for tables that never made it into the "source tables" column: access through a `JOIN` inside a subquery is invisible in the source list altogether. Below the query, the report's declared sources are shown flagged "present in the query" — the discrepancy between the file's list and the text is exactly what the page helps notice; comparison also matches the name without its schema, because queries write tables both ways, and a "no" can be legitimate (the object arrives through a view or a routine). The median number of lines per query rather than the mean: one thousand-line query would skew the mean. `SCHEMA_VERSION` was not raised — the `sql_text` column arrived in the previous change; here only the mapping, the ETL and the interface changed. |
+| 2026-08-07 | **The colleague HTML file was brought up to the app's composition, and the menu moved to the left.** The customer asked to make the file complete and to look at the interface while at it. Three sections were missing: "Unique reports", "Database queries" and a full "Networks and plants" — the DC comparison lived as a half inside "Overview". The reason for the drift was systemic: the rule "the composition mirrors the app's sections" rested on words in the documentation, so a new page appeared in the app without appearing in the file and nothing caught it. Hence the new `test_html_export_covers_every_app_page` test: it reads the page list from `app/Home.py`, demands a section in the template and an entry in the `TABS` menu for each, and knows the exceptions — data loading, ad-hoc SQL and building the file itself (the owner's tools). The test was verified to fail when a section is removed: without that check it could have been passing vacuously.
+
+On the interface: a flat row of tabs wrapped onto two lines at fifteen sections, and finding the right one there became harder than in a list. The menu became a sidebar with the same groups as the app — the same order and the same names, so a colleague does not have to relearn where things are. The current section's name moved into the header and is taken from the section's own heading rather than the menu label: otherwise the two would drift apart on a rename. The heading inside the section is hidden — the same name read twice looks like carelessness. On a narrow screen (up to 900 px) the menu returns to the top as a row: a vertical list would fill the whole first screen and the content would need scrolling.
+
+Two decisions about the data. First: the SQL query text travels in full — truncating would show an incomplete query that cannot be judged; on demo data the file grew from 0.90 to 1.02 MB, on real data it will grow more, and the build page reports the weight honestly. Second: the similarity threshold on "Unique reports" stayed a slider, and FACTS travel into the file — namesakes, the closest twin, the similarity value. The "unique" flag is computed by JS from the slider position: a wired-in threshold would create a second truth about uniqueness, one in the file and another in the app. Two inaccuracies were fixed along the way: the share of reports with a query was computed from the displayed list (which is filtered by having a query by default, so the share was always 100%) — the denominator is now all reports in scope; and the "Twin" column was renamed to "Closest twin", because for unique reports it shows a similarity below the threshold, that is, the closest one rather than a twin. `colsFn` was added to `makeTable` — the column set of "Unique reports" changes with the comparison scope, and rebuilding the table is not an option: `makeTable` pushes its own `render` into the shared redraw list, so old handlers would hang on the same element and override the new columns. |

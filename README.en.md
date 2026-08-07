@@ -156,12 +156,15 @@ The file is self-contained: data, styles and scripts inside, not a single
 external request. It opens by double-click, works offline, and supports light
 and dark themes, search, sorting and CSV export.
 
-**Inside it is the same as in the app.** Tabs follow the same menu groups:
+**Inside it are all of the app's pages.** The left menu mirrors the app's:
 Overview, all of "DC analytics" (№1–№5), the entire "Reports" section (report
-card, volume and cost, decommission candidates, similar reports, ABC analysis)
-and the tables reference. The same metrics, the same columns, the same
-click-a-row breakdown, one DC selector for the whole file. Nothing is
-truncated: lists are complete.
+card, volume and cost, decommission candidates, similar reports, unique reports,
+ABC analysis), the references (source objects, networks and plants) and
+"Database queries" with the SQL text per report. The same metrics, the same
+columns, the same click-a-row breakdown, one DC selector for the whole file.
+Nothing is truncated: lists are complete, and the similarity threshold on
+"Unique reports" is still a slider. The match with the app is locked down by a
+test — a new page cannot appear in the app without appearing in the file.
 
 Only data loading and ad-hoc SQL are left out — those are the database owner's
 tools, not the reader's.

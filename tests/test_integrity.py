@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -1802,6 +1803,7 @@ def test_html_export_is_self_contained(full_db, tmp_path, paths):
     mapping = load_mapping()
     mapping.table_sizes.file = str(paths["sizes"])
     mapping.report_usage.file = str(paths["usage"])
+    mapping.report_sql.file = str(paths["sql"])
     db = tmp_path / "export.duckdb"
     build(paths["reports"], db, mapping)
 
@@ -1815,3 +1817,58 @@ def test_html_export_is_self_contained(full_db, tmp_path, paths):
     external = re.findall(r"""(?:src|href)\s*=\s*["']https?://""", html)
     assert not external, f"HTML тянет внешние ресурсы: {external}"
     assert "Отчётность SSRS" in html
+
+
+def test_html_export_covers_every_app_page():
+    """Состав автономного файла повторяет разделы приложения.
+
+    Коллега без Python и Docker обязан видеть то же, что владелец базы. Раньше
+    это правило держалось только на словах в документации: новая страница в
+    приложении появлялась, а в HTML её не было, и заметить это было нечем.
+    Из состава исключены только инструменты владельца базы — загрузка данных,
+    произвольный SQL и сама сборка файла.
+    """
+    nav = (ROOT / "app" / "Home.py").read_text(encoding="utf-8")
+    template = (ROOT / "src" / "reportsdb" / "templates" / "standalone.html")
+    html = template.read_text(encoding="utf-8")
+
+    owner_only = {"load.py", "sql.py", "export.py"}
+    pages = [
+        page for page in re.findall(r'views/([a-z0-9_]+\.py)"', nav)
+        if page not in owner_only
+    ]
+    assert pages, "не удалось прочитать список страниц из app/Home.py"
+
+    # Страница приложения → раздел HTML. Имена разные там, где в файле один
+    # раздел покрывает несколько страниц приложения (пять таблиц РЦ) либо
+    # наоборот.
+    expected = {
+        "overview.py": "overview",
+        "rc1_tables.py": "rc1",
+        "rc2_report_tables.py": "rc2",
+        "rc3_routines.py": "rc3",
+        "rc4_usage.py": "rc4",
+        "rc5_retention.py": "rc5",
+        "report_card.py": "card",
+        "cost.py": "cost",
+        "candidates.py": "candidates",
+        "report_overlap.py": "overlap",
+        "unique_reports.py": "unique",
+        "abc.py": "abc",
+        "tables.py": "tables",
+        "networks.py": "networks",
+        "report_sql.py": "reportsql",
+    }
+    missing_map = [p for p in pages if p not in expected]
+    assert not missing_map, (
+        f"страницы приложения не сопоставлены с разделами HTML: {missing_map}. "
+        "Добавьте раздел в standalone.html и запись в этот тест."
+    )
+    for page in pages:
+        tab = expected[page]
+        assert f'data-tab="{tab}"' in html, (
+            f"страница {page} есть в приложении, а раздела «{tab}» в HTML нет"
+        )
+        assert f"['{tab}'," in html, (
+            f"раздел «{tab}» есть в разметке HTML, но не попал в меню TABS"
+        )

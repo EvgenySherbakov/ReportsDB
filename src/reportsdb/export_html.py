@@ -46,10 +46,16 @@ QUERIES = {
                f.exclusive_pct_of_db, f.size_coverage_pct,
                c.exec_count, c.avg_duration_sec, c.total_duration_sec, c.quadrant,
                s.view_count, s.matview_count, s.temp_count, s.routine_count,
-               s.retention_days, s.table_names
+               s.retention_days, s.table_names,
+               -- Текст запроса едет в файл целиком: страница «Запросы к БД» без
+               -- него пуста, а обрезать значило бы показать неполный SQL, по
+               -- которому нельзя судить о запросе. На размер влияет заметно,
+               -- поэтому страница сборки честно показывает вес файла.
+               r.sql_text
         FROM v_report_footprint f
         LEFT JOIN v_report_cost_value c     ON c.report_id = f.report_id
         LEFT JOIN v_report_tables_summary s ON s.report_id = f.report_id
+        LEFT JOIN dim_report r              ON r.report_id = f.report_id
         ORDER BY f.exclusive_mb DESC NULLS LAST
     """,
     # Все связи «отчёт → объект» одним набором: из него собираются таблица №2
@@ -151,6 +157,27 @@ QUERIES = {
     """,
     # Сравнение РЦ между собой: отчёты и объём базы завода рядом.
     "rc": "SELECT * FROM v_network_overview",
+    # Двойники отчёта в разрезе заводов своей ТС. Порог сходства на странице —
+    # ползунок, поэтому в файл едут ФАКТЫ (сходство, тёзки), а не готовый
+    # признак «уникален»: иначе в файле была бы одна правда, а в приложении
+    # другая. Имя отчёта не дублируется — JS подставит его по report_id.
+    "twin": """
+        SELECT report_id, name_twin_count, name_twin_where,
+               best_jaccard, best_shared_tables, best_twin_report, best_twin_where,
+               counterparts_compared
+        FROM v_report_twin
+        WHERE scope = 'PLANT'
+    """,
+    # Отчёт сети целиком: строка на «ТС + наименование», заводы схлопнуты. Это
+    # единица счёта для вопроса «чем различаются сети» — тот же отчёт на трёх
+    # заводах одной ТС считается один раз.
+    "nettwin": """
+        SELECT network, name_key, report_name, plant_count, plants,
+               table_count, tables_total_mb, exec_count, networks_compared,
+               name_twin_count, name_twin_networks, best_jaccard,
+               best_shared_tables, best_twin_report, best_twin_network
+        FROM v_network_report_twin
+    """,
 }
 
 # Показатели считаются в браузере из тех же наборов, что видит пользователь, —
